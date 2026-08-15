@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { Navigate, NavLink, Route, Routes } from "react-router-dom";
 import { LEAF_MODULES, MODULES } from "./modules/registry";
+import ModuleErrorBoundary from "./components/ModuleErrorBoundary";
 import Home from "./pages/Home";
 
 /** Fallback singkat saat chunk modul sedang diunduh (lazy load). */
@@ -59,12 +60,35 @@ export default function App() {
       <main className="content">
         <Suspense fallback={<PageLoader />}>
           <Routes>
-            <Route path="/" element={<Home />} />
+            <Route
+              path="/"
+              element={
+                <ModuleErrorBoundary key="home">
+                  <Home />
+                </ModuleErrorBoundary>
+              }
+            />
             {MODULES.map((m) => (
-              <Route key={m.id} path={m.path} element={<m.Component />} />
+              <Route
+                key={m.id}
+                path={m.path}
+                element={
+                  <ModuleErrorBoundary key={m.path}>
+                    <m.Component />
+                  </ModuleErrorBoundary>
+                }
+              />
             ))}
             {LEAF_MODULES.map((l) => (
-              <Route key={l.id} path={l.path} element={<l.Component />} />
+              <Route
+                key={l.id}
+                path={l.path}
+                element={
+                  <ModuleErrorBoundary key={l.path}>
+                    <l.Component />
+                  </ModuleErrorBoundary>
+                }
+              />
             ))}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
