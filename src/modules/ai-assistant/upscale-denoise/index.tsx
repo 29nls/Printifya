@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  canvasToBlob,
+  canvasLikeToBlob,
   compareFormats,
   loadImageToCanvas,
   processImage,
@@ -9,6 +9,7 @@ import {
   type FormatStat,
   type OutFormat,
 } from "./waifu2x";
+import type { Waifu2xWorkerResponse } from "./waifu2xWorkerApi";
 import { setPendingPasFoto } from "../../shared/pasFotoBridge";
 import {
   setPendingLayoutPhoto,
@@ -115,10 +116,67 @@ export default function UpscaleDenoisePage() {
 
   const scale = SCALE_PRESETS.find((s) => s.id === scaleId)?.value ?? customScale;
 
+  // Pipeline berat (upscale/denoise/TTA) dijalankan di Web Worker + OffscreenCanvas
+  // agar batch tidak membekukan UI; fallback thread utama bila tidak didukung.
+  const offscreenWorker =
+    typeof OffscreenCanvas !== "undefined" && typeof Worker !== "undefined";
+  const workerRef = useRef<Worker | null>(null);
+  const workerSeqRef = useRef(0);
+
+  const getWorker = (): Worker => {
+    if (!workerRef.current) {
+      workerRef.current = new Worker(
+        new URL("./waifu2x.worker.ts", import.meta.url),
+        { type: "module" }
+      );
+    }
+    return workerRef.current;
+  };
+
+  /** Kirim satu gambar ke worker; resolve saat balasan dengan id cocok tiba. */
+  const runInWorker = (
+    bitmap: ImageBitmap,
+    options: { scale: number; denoise: DenoiseLevel; tta: boolean },
+    format: OutFormat,
+    quality: number
+  ): Promise<Extract<Waifu2xWorkerResponse, { ok: true }>> => {
+    const worker = getWorker();
+    const id = ++workerSeqRef.current;
+    return new Promise((resolve, reject) => {
+      const onMessage = (e: MessageEvent<Waifu2xWorkerResponse>) => {
+        if (e.data.id !== id) return;
+        worker.removeEventListener("message", onMessage);
+        worker.removeEventListener("error", onError);
+        if (e.data.ok) resolve(e.data);
+        else reject(new Error(e.data.error));
+      };
+      const onError = () => {
+        worker.removeEventListener("message", onMessage);
+        reject(new Error("Worker gagal memproses gambar."));
+      };
+      worker.addEventListener("message", onMessage);
+      worker.addEventListener("error", onError);
+      worker.postMessage({ id, bitmap, options, format, quality }, [bitmap]);
+    });
+  };
+
+  /** Salin ImageBitmap hasil ke kanvas (referensi perbandingan format), lalu
+   *  bebaskan bitmap. */
+  const bitmapToCanvas = (bmp: ImageBitmap): HTMLCanvasElement => {
+    const c = document.createElement("canvas");
+    c.width = bmp.width;
+    c.height = bmp.height;
+    c.getContext("2d")!.drawImage(bmp, 0, 0);
+    bmp.close();
+    return c;
+  };
+
   useEffect(
     () => () => {
       cancelledRef.current = true;
       urlsRef.current.forEach((u) => URL.revokeObjectURL(u));
+      workerRef.current?.terminate();
+      workerRef.current = null;
     },
     []
   );
@@ -196,9 +254,28 @@ export default function UpscaleDenoisePage() {
       prev.map((x) => (x.id === it.id ? { ...x, status: "memproses" } : x))
     );
     try {
-      const src = await loadImageToCanvas(it.origUrl);
-      const out = processImage(src, { scale, denoise, tta });
-      const blob = await canvasToBlob(out, outFormat, quality / 100);
+      let out: HTMLCanvasElement;
+      let blob: Blob;
+      if (offscreenWorker) {
+        // Jalur worker: decode ImageBitmap (off-main-thread), transfer ke
+        // worker, pipeline di OffscreenCanvas, hasil balik sebagai blob +
+        // bitmap. Thread utama hanya menyalin bitmap hasil ke kanvas (cepat).
+        const bmp = await fetch(it.origUrl)
+          .then((r) => r.blob())
+          .then((b) => createImageBitmap(b));
+        if (cancelledRef.current) return;
+        const res = await runInWorker(bmp, { scale, denoise, tta }, outFormat, quality / 100);
+        if (cancelledRef.current) return;
+        out = bitmapToCanvas(res.bitmap);
+        blob = res.blob;
+      } else {
+        // Fallback browser lama (tanpa OffscreenCanvas): pipeline di thread
+        // utama — factory default membuat HTMLCanvasElement.
+        const src = await loadImageToCanvas(it.origUrl);
+        const processed = processImage(src, { scale, denoise, tta });
+        blob = await canvasLikeToBlob(processed, outFormat, quality / 100);
+        out = processed as HTMLCanvasElement;
+      }
       const url = URL.createObjectURL(blob);
       urlsRef.current.push(url);
       // Perbandingan format TIDAK dihitung di sini — mahal (3 encode + PSNR

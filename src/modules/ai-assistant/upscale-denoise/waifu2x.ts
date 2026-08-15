@@ -159,7 +159,7 @@ export interface ProcessOptions {
 export function processImage(
   src: CanvasLike,
   { scale, denoise, tta }: ProcessOptions
-): HTMLCanvasElement {
+): CanvasLike {
   const angles = tta ? [0, 1, 2, 3] : [0];
   const variants = angles.map((a) => {
     const rot = rotate90(src, a);
