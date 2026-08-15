@@ -23,6 +23,25 @@
   line-height: 0;
 }
 
+/* Thumbnail = pegangan drag untuk mengurutkan ulang strip. */
+.photo-strip img {
+  cursor: grab;
+}
+
+.photo-strip img:active {
+  cursor: grabbing;
+}
+
+.photo-item-dragging {
+  opacity: 0.4;
+}
+
+.photo-item-over {
+  outline: 2px dashed var(--accent);
+  outline-offset: 3px;
+  border-radius: 10px;
+}
+
 .photo-label-input {
   display: block;
   width: 96px;

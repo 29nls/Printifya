@@ -14,6 +14,8 @@ export interface PdfSheetOptions {
   labels?: string[];
   /** Ukuran font label dalam pt. */
   labelSizePt?: number;
+  /** Garis potong putus-putus antar sel (mudah dipotong setelah cetak). */
+  cutLines?: boolean;
 }
 
 export const MIN_MARGIN_CM = 0.2;
@@ -134,6 +136,7 @@ async function buildSheetDoc(
     orientation,
     labels,
     labelSizePt,
+    cutLines,
   }: PdfSheetOptions,
   autoPrint: boolean
 ): Promise<jsPDF> {
@@ -187,6 +190,23 @@ async function buildSheetDoc(
           align: "center",
         });
       }
+    }
+
+    // Garis potong putus-putus antar sel (sekat) — mudah dipotong setelah cetak.
+    if (cutLines) {
+      doc.saveGraphicsState();
+      doc.setLineWidth(0.2);
+      doc.setDrawColor(150, 150, 150);
+      doc.setLineDashPattern([0.8, 0.7], 0);
+      for (let c = 1; c < cols; c++) {
+        const x = marginX + c * size.widthMm;
+        doc.line(x, marginY, x, marginY + gridH);
+      }
+      for (let r = 1; r < rows; r++) {
+        const y = marginY + r * size.heightMm;
+        doc.line(marginX, y, marginX + gridW, y);
+      }
+      doc.restoreGraphicsState();
     }
   }
 

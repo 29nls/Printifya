@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { PasFotoSize } from "../../photo-studio/shared/pasFotoSize";
 import A4SheetPreview from "../../photo-studio/shared/A4SheetPreview";
+import FramePicker from "../../photo-studio/shared/FramePicker";
+import { applyFrame, getFrame } from "../../photo-studio/shared/frames";
 import {
   chooseOrientation,
   exportLayoutPdf,
@@ -153,11 +155,67 @@ export default function AutoLayoutPage() {
   const [labelSize, setLabelSize] = useState<LabelSizeValue>(
     (saved?.labelSize as LabelSizeValue) ?? "medium"
   );
+  // Drag untuk mengurutkan ulang strip foto (indeks sumber & target).
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [overIdx, setOverIdx] = useState<number | null>(null);
+  // Bingkai photobox — default dari localStorage, "" = tanpa bingkai.
+  const [frameId, setFrameId] = useState(saved?.frameId ?? "");
+  const frame = getFrame(frameId);
+  // Garis potong (sekat) antar sel — default AKTIF agar mudah dipotong.
+  const [cutLines, setCutLines] = useState(saved?.cutLines ?? true);
+  // Versi ber-bingkai tiap foto (kunci = URL asli). Dihitung ulang saat
+  // daftar foto / bingkai / ukuran sel berubah.
+  const [framedMap, setFramedMap] = useState<Record<string, string>>({});
+  // Signature SET URL foto (urut-bebas): efek bingkai hanya dipicu saat foto
+  // ditambah/dihapus — mengedit label atau meng-drag urutan tidak menambah
+  // foto, jadi tidak perlu mem-frame ulang semuanya.
+  const photosSignature = [...new Set(photos.map((p) => p.url))]
+    .sort()
+    .join("\u0000");
 
-  // Persist pengaturan kertas, grid & label setiap berubah.
+  // Persist pengaturan kertas, grid, label & bingkai setiap berubah.
   useEffect(() => {
-    saveLayoutSettings({ cols, rows, marginCm, paperId: paper.id, showLabels, labelSize });
-  }, [cols, rows, marginCm, paper, showLabels, labelSize]);
+    saveLayoutSettings({
+      cols,
+      rows,
+      marginCm,
+      paperId: paper.id,
+      showLabels,
+      labelSize,
+      frameId,
+      cutLines,
+    });
+  }, [cols, rows, marginCm, paper, showLabels, labelSize, frameId, cutLines]);
+
+  // Terapkan bingkai ke semua foto (blob URL → data URL ber-bingkai).
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      if (!frame) {
+        setFramedMap({});
+        return;
+      }
+      const result: Record<string, string> = {};
+      for (const p of photos) {
+        if (cancelled) return;
+        try {
+          result[p.url] = await applyFrame(
+            p.url,
+            frame,
+            size.widthPx,
+            size.heightPx
+          );
+        } catch {
+          // gagal di-frame — biarkan foto asli
+        }
+      }
+      if (!cancelled) setFramedMap(result);
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [frame, photosSignature, size.id]);
   const [exporting, setExporting] = useState(false);
   const [printing, setPrinting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -193,6 +251,9 @@ export default function AutoLayoutPage() {
     setPage((p) => Math.min(p, totalPages - 1));
   }, [totalPages]);
 
+  /** URL ber-bingkai untuk satu foto (fallback ke asli bila belum siap). */
+  const framedOf = (url: string) => framedMap[url] ?? url;
+
   /** Foto untuk halaman aktif: halaman penuh diisi berurutan; bila foto kurang dari sel, diulang. */
   const pageItems = multiPage
     ? photos.slice(page * count, page * count + count)
@@ -200,11 +261,31 @@ export default function AutoLayoutPage() {
         { length: count },
         (_, i) => photos[i % photos.length]
       ).filter(Boolean);
-  const pageSrcs = pageItems.map((p) => p.url);
+  const pageSrcs = pageItems.map((p) => framedOf(p.url));
   const pageLabels = pageItems.map((p) => p.name);
 
   const labelSizeDef =
     LABEL_SIZES.find((s) => s.value === labelSize) ?? LABEL_SIZES[1];
+
+  /**
+   * Drag antar sel di pratinjau: pindahkan foto dari sel `from` ke sel `to`
+   * pada halaman aktif. Mode banyak-halaman memetakan sel ke indeks foto
+   * absolut (page*count + i); mode ulang (foto < sel) memetakan lewat siklus
+   * `i % photos.length`. Mengubah urutan `photos` — pratinjau, label, PDF,
+   * dan cetak semuanya mengikuti urutan baru.
+   */
+  const reorderPhoto = (from: number, to: number) => {
+    if (from === to || photos.length === 0) return;
+    const absFrom = multiPage ? page * count + from : from % photos.length;
+    const absTo = multiPage ? page * count + to : to % photos.length;
+    setPhotos((prev) => {
+      if (absFrom >= prev.length || absFrom === absTo) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(absFrom, 1);
+      next.splice(absTo, 0, moved);
+      return next;
+    });
+  };
 
   const handleFiles = (files?: FileList | null) => {
     setError("");
@@ -261,6 +342,17 @@ export default function AutoLayoutPage() {
     );
   };
 
+  /** Pindahkan foto dari indeks `from` ke `to` di strip (drag thumbnail). */
+  const movePhoto = (from: number, to: number) => {
+    if (from === to) return;
+    setPhotos((prev) => {
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  };
+
   /** Blob URL → data URL mandiri (tahan terhadap revoke object URL). */
   const toDataUrl = (url: string): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -301,6 +393,8 @@ export default function AutoLayoutPage() {
     setMarginCm(DEFAULT_MARGIN_CM);
     setShowLabels(false);
     setLabelSize("medium");
+    setFrameId("");
+    setCutLines(true);
   };
 
   const handleExport = async () => {
@@ -308,7 +402,7 @@ export default function AutoLayoutPage() {
     setError("");
     setExporting(true);
     try {
-      await exportLayoutPdf(size, photos.map((p) => p.url), {
+      await exportLayoutPdf(size, photos.map((p) => framedOf(p.url)), {
         cols,
         rows,
         marginCm,
@@ -316,6 +410,7 @@ export default function AutoLayoutPage() {
         orientation,
         labels: showLabels ? photos.map((p) => p.name) : undefined,
         labelSizePt: showLabels ? labelSizeDef.pt : undefined,
+        cutLines,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Gagal membuat PDF.");
@@ -336,7 +431,7 @@ export default function AutoLayoutPage() {
     try {
       // Satu gambar per sel (berurutan); mode siklus memakai isian halaman ini.
       const items = multiPage ? photos : pageItems;
-      const srcs = items.map((p) => p.url);
+      const srcs = items.map((p) => framedOf(p.url));
       const html = buildHtmlSheet(srcs, size, {
         cols,
         rows,
@@ -345,6 +440,7 @@ export default function AutoLayoutPage() {
         orientation,
         labels: showLabels ? items.map((p) => p.name) : undefined,
         labelSizePt: showLabels ? labelSizeDef.pt : undefined,
+        cutLines,
       });
       const ok = printHtmlSheet(html);
       if (!ok) {
@@ -442,8 +538,44 @@ export default function AutoLayoutPage() {
             />
             <div className="photo-strip">
               {photos.map((p, i) => (
-                <div className="photo-item" key={i}>
-                  <img src={p.url} alt={p.name} title={p.name} />
+                <div
+                  className={`photo-item${
+                    dragIdx === i ? " photo-item-dragging" : ""
+                  }${overIdx === i ? " photo-item-over" : ""}`}
+                  key={i}
+                  onDragOver={(e) => {
+                    if (dragIdx === null || dragIdx === i) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    setOverIdx(i);
+                  }}
+                  onDragLeave={() =>
+                    setOverIdx((cur) => (cur === i ? null : cur))
+                  }
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setOverIdx(null);
+                    if (dragIdx !== null && dragIdx !== i) movePhoto(dragIdx, i);
+                    setDragIdx(null);
+                  }}
+                >
+                  <img
+                    src={p.url}
+                    alt={p.name}
+                    title="Seret untuk mengatur ulang urutan foto"
+                    draggable
+                    onDragStart={(e) => {
+                      setDragIdx(i);
+                      setOverIdx(null);
+                      e.dataTransfer.effectAllowed = "move";
+                      // Data teks wajib agar drag mulai berjalan di Firefox.
+                      e.dataTransfer.setData("text/plain", String(i));
+                    }}
+                    onDragEnd={() => {
+                      setDragIdx(null);
+                      setOverIdx(null);
+                    }}
+                  />
                   <input
                     className="photo-label-input"
                     value={p.name}
@@ -465,7 +597,9 @@ export default function AutoLayoutPage() {
             <p className="hint">
               💡 Ketik nama/keterangan di bawah tiap foto (label muncul di
               lembar bila diaktifkan). Klik 🪪 pada thumbnail untuk meneruskan
-              foto itu langsung ke alur crop Pas Foto 3x4.
+              foto itu langsung ke alur crop Pas Foto 3x4. Seret thumbnail untuk
+              mengatur ulang urutan foto — lembar, label, PDF, dan cetak
+              mengikuti urutan baru.
             </p>
           </>
         )}
@@ -544,6 +678,15 @@ export default function AutoLayoutPage() {
                   onChange={(e) => setShowLabels(e.target.checked)}
                 />
                 Tampilkan nama di lembar
+              </label>
+              <FramePicker value={frameId} onChange={setFrameId} />
+              <label className="label-toggle">
+                <input
+                  type="checkbox"
+                  checked={cutLines}
+                  onChange={(e) => setCutLines(e.target.checked)}
+                />
+                ✂️ Garis potong antar foto
               </label>
               {showLabels && (
                 <label>
@@ -632,7 +775,20 @@ export default function AutoLayoutPage() {
               orientation={orientation}
               labels={showLabels ? pageLabels : undefined}
               labelSizePx={showLabels ? labelSizeDef.previewPx : undefined}
+              onDropPhoto={reorderPhoto}
+              cutLines={cutLines}
             />
+            <p className="hint">
+              💡 Seret foto antar sel di lembar untuk mengatur ulang urutan —
+              label, ekspor PDF, dan cetak mengikuti urutan baru. Bingkai yang
+              dipilih diterapkan ke tiap foto di pratinjau, ekspor PDF, dan
+              cetak. Garis potong putus-putus antar foto memudahkan pemotongan
+              setelah cetak (bisa dimatikan di pengaturan). {multiPage
+                ? "Setiap halaman disusun ulang secara terpisah."
+                : photos.length < count
+                  ? "Foto diulang bila lebih sedikit dari sel — urutan siklus mengikuti susunan baru."
+                  : ""}
+            </p>
           </section>
         </>
       )}

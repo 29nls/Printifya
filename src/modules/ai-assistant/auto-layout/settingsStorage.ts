@@ -19,6 +19,10 @@ export interface LayoutSettings {
   paperId: string;
   showLabels: boolean;
   labelSize: string; // "small" | "medium" | "large"
+  /** Id bingkai photobox (lihat photo-studio/shared/frames.ts); "" = tanpa. */
+  frameId: string;
+  /** Garis potong putus-putus antar sel (sekat setelah cetak). */
+  cutLines: boolean;
 }
 
 const LABEL_SIZES = ["small", "medium", "large"];
@@ -39,6 +43,9 @@ export function loadLayoutSettings(): Partial<LayoutSettings> | null {
         typeof p.labelSize === "string" && LABEL_SIZES.includes(p.labelSize)
           ? p.labelSize
           : undefined,
+      frameId: typeof p.frameId === "string" ? p.frameId : undefined,
+      cutLines:
+        typeof p.cutLines === "boolean" ? p.cutLines : undefined,
     };
   } catch {
     return null;

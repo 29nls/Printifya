@@ -68,7 +68,8 @@ Dihasilkan oleh `exportPasFotoPdf` (`{fileName}-a4.pdf`) untuk satu foto dan
   modul pengolahan foto yang bisa meneruskan hasilnya ke alur pas foto 3×4 via `pasFotoBridge`
   (tidak termasuk dalam matriks di atas karena bukan modul template cetak). Auto Layout menerima
   hasil dari semua modul AI + pas foto via `autoLayoutBridge`. Modul terbaru **Upscale & Denoise**
-  (gaya Waifu2x, heuristik) menambah kemampuan perbesaran resolusi & pengurangan noise.
+  (gaya Waifu2x, heuristik) menambah kemampuan perbesaran resolusi & pengurangan noise serta
+  meneruskan hasilnya ke pas foto & Auto Layout (awalan `waifu2x-`).
 
 ---
 
@@ -81,7 +82,7 @@ Keempat modul berikut adalah modul yang baru diimplementasikan (sebelumnya place
 
 | Fitur | PDF Editor | QZ Tray | Network Printer | PDF Export |
 |---|---|---|---|---|
-| **Mesin** | pdf-lib (lazy import) | WebSocket → QZ Tray | IPP heuristik (`no-cors`) | `exportPdf` + `printHtml` + jsPDF |
+| **Mesin** | pdf-lib (lazy import) | WebSocket → QZ Tray | `qzClient` (QZ Tray) + IPP heuristik (`no-cors`) | `exportPdf` + `printHtml` + jsPDF |
 | Upload / pratinjau | ✅ PDF upload + iframe native | — | — | ✅ foto upload |
 | Jumlah halaman & ukuran file | ✅ | — | — | — |
 | **Gabung** PDF | ✅ (semua dokumen) | — | — | — |
@@ -91,7 +92,8 @@ Keempat modul berikut adalah modul yang baru diimplementasikan (sebelumnya place
 | Unduh / buka hasil | ✅ (setiap operasi → dokumen baru) | — | — | ✅ |
 | Koneksi QZ Tray (`ws://localhost:8181`) | — | ✅ status + handshake | — | — |
 | Daftar printer | — | ✅ `findPrinters`/`findPrinter` | ✅ registri + persist localStorage | — |
-| Cetak raw ESC/POS | — | ✅ tes cetak (init/tebal/teks/cut) | — | — |
+| Cetak raw ESC/POS | — | ✅ tes cetak (init/tebal/teks/cut) | ✅ (via `qzClient`) | — |
+| Rute otomatis **QZ Tray → IPP → fallback PDF** | — | — | ✅ (QZ dulu, turun ke IPP, lalu PDF) | — |
 | Antrean job + status | — | — | ✅ (antre/mengirim/berhasil/gagal) | — |
 | Uji koneksi printer IPP | — | — | ✅ heuristik terjangkau/tidak | — |
 | Fallback PDF (selalu berfungsi) | — | — | ✅ | — |
@@ -127,10 +129,15 @@ Keempat modul berikut adalah modul yang baru diimplementasikan (sebelumnya place
   terpasang modul aman terputus. Tidak ada dependency baru.
 - **Network Printer** tidak bisa mengirim IPP sungguhan dari browser (CORS lintas-asal), jadi
   modul menyediakan registri printer (persist localStorage), uji koneksi heuristik `no-cors`,
-  antrean job dengan status, dan **fallback ekspor PDF** yang selalu berfungsi. Dua bug kecil
-  ditemukan & diperbaiki saat verifikasi: heuristik `no-cors` yang menelan kegagalan jaringan,
-  dan `"tidak terjangkau".includes("terjangkau")` yang membuat job "berhasil" padahal printer
-  tidak terjangkau.
+  antrean job dengan status, dan **fallback ekspor PDF** yang selalu berfungsi. Cetak memakai
+  **rute otomatis**: (1) bila QZ Tray terhubung, job dicetak raw ESC/POS ke printer QZ terpilih;
+  (2) bila gagal/tidak terhubung, dicoba lewat IPP heuristik; (3) bila IPP tak terjangkau, job
+  berstatus gagal dengan catatan jelas + tombol "Ekspor PDF (fallback)". Klien QZ dipakai
+  bersama dengan modul QZ Tray lewat `print-center/qz-tray/qzClient.ts` (satu sumber kebenaran
+  protokol WebSocket QZ: handshake → `findPrinters`/`findPrinter` → `print` raw base64). Dua bug
+  kecil ditemukan & diperbaiki saat verifikasi: heuristik `no-cors` yang menelan kegagalan
+  jaringan, dan `"tidak terjangkau".includes("terjangkau")` yang membuat job "berhasil" padahal
+  printer tidak terjangkau.
 - **PDF Export** adalah hub ekspor yang memakai ulang infrastruktur inti: mode foto
   (`exportPasFotoPdf` + grid kolom/baris + kertas/orientasi), mode dokumen (jsPDF teks native
   selectable), dan tombol Cetak (foto → PDF autoPrint; dokumen → iframe HTML `printHtmlSheet`).
@@ -164,17 +171,22 @@ koreksi berbasis histogram, dan upscale/denoise gaya Waifu2x.
 | TTA (rata-rata 4 orientasi) | ❌ | ❌ | ❌ | ❌ | ✅ |
 | Format output PNG/WebP/JPG + kualitas | ❌ | ❌ | ❌ | ❌ | ✅ |
 | Perbandingan hasil (slider) | ❌ | ❌ | ✅ | ❌ | ✅ |
+| Perbandingan format PNG/WebP/JPG (ukuran file + PSNR) | ❌ | ❌ | ❌ | ❌ | ✅ |
+| **Unduh Semua** (batch berurutan, aman browser) | ❌ | ❌ | ❌ | ❌ | ✅ |
 | **Susun lembar cetak** (grid kolom/baris) | ❌ | ❌ | ❌ | ✅ | ❌ |
 | Kertas A3/A4/A5/R2–R30 | ❌ | ❌ | ❌ | ✅ | ❌ |
 | Orientasi otomatis potret/lanskap | ❌ | ❌ | ❌ | ✅ | ❌ |
 | Label nama per foto di lembar | ❌ | ❌ | ❌ | ✅ | ❌ |
 | Pratinjau ukuran penuh 1:1 (scroll) | ❌ | ❌ | ❌ | ✅ | ❌ |
+| **Drag urut ulang foto** (lembar antar sel + strip thumbnail) | ❌ | ❌ | ❌ | ✅ | ❌ |
+| **Bingkai photobox** (50 bingkai, 5 kategori, pratinjau live) | ❌ | ❌ | ❌ | ✅ | ❌ |
+| **Garis potong (sekat)** antar foto — default aktif (pratinjau/PDF/cetak) | ❌ | ❌ | ❌ | ✅ | ❌ |
 | **Ekspor PDF** (.pdf) | ❌ | ❌ | ❌ | ✅ | ❌ |
 | **Cetak** (dialog browser, iframe HTML) | ❌ | ❌ | ❌ | ✅ | ❌ |
 | Unduh hasil | ✅ PNG | ✅ PNG + mask | ✅ PNG | — (PDF/cetak) | ✅ PNG/WebP/JPG per foto |
-| Terusan **Jadikan Pas Foto 3×4** (`pasFotoBridge`) | ✅ | ✅ | ✅ | ✅ (per foto) | ❌ |
-| Terusan **Susun ke Auto Layout** (`autoLayoutBridge`) | ✅ (prefix `auto-`) | ✅ (`bg-`) | ✅ (`enhanced-`) | — (modul itu sendiri) | ❌ |
-| Persist localStorage + tombol reset preferensi | ✅ | ✅ | ❌ | ✅ | ❌ |
+| Terusan **Jadikan Pas Foto 3×4** (`pasFotoBridge`) | ✅ | ✅ | ✅ | ✅ (per foto) | ✅ (per hasil) |
+| Terusan **Susun ke Auto Layout** (`autoLayoutBridge`) | ✅ (prefix `auto-`) | ✅ (`bg-`) | ✅ (`enhanced-`) | — (modul itu sendiri) | ✅ (`waifu2x-`, satu atau batch) |
+| Persist localStorage + tombol reset preferensi | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ## Contoh Nama File
 
@@ -195,10 +207,21 @@ koreksi berbasis histogram, dan upscale/denoise gaya Waifu2x.
   `-om/--only-mask`, `--bgcolor`); Upscale & Denoise mengikuti alur
   [Waifu2x-Extension-GUI](https://github.com/AaronFeng753/Waifu2x-Extension-GUI) (skala, denoise,
   TTA, batch, bandingkan). Semua padanan heuristik tanpa jaringan saraf.
-- **Bridge antar-modul**: `pasFotoBridge` meneruskan hasil ke alur crop Pas Foto 3×4;
-  `autoLayoutBridge` meneruskan foto ke Auto Layout (dengan awalan nama per modul:
-  `auto-`, `bg-`, `enhanced-`). Auto Layout juga menerima batch multi-orang dari Photo Studio.
-- **Persistensi**: Auto Crop Face (zoom), Background Removal (opsi segmen + awalan), dan Auto
-  Layout (grid/kertas/label) menyimpan preferensi di localStorage dengan tombol
-  `ResetPreferencesButton` (konfirmasi dua-klik). Enhance Photo & Upscale & Denoise belum
-  memakai localStorage.
+- **Bridge antar-modul**: `pasFotoBridge` meneruskan hasil ke alur crop Pas Foto 3×4 (semua
+  modul AI + Auto Layout per foto + Upscale & Denoise per hasil); `autoLayoutBridge`
+  meneruskan foto ke Auto Layout dengan awalan nama per modul (`auto-`, `bg-`, `enhanced-`,
+  `waifu2x-`; Upscale & Denoise bisa mengirim semua hasil batch sekaligus via
+  `setPendingLayoutPhotos`). Auto Layout juga menerima batch multi-orang dari Photo Studio.
+- **Persistensi**: kelima modul menyimpan preferensi di localStorage dengan tombol
+  `ResetPreferencesButton` (konfirmasi dua-klik): Auto Crop Face (zoom `--facePercent`),
+  Background Removal (opsi segmen + awalan), Enhance Photo (awalan), Auto Layout
+  (grid/kertas/label/bingkai/garis potong), Upscale & Denoise (skala/denoise/TTA/format/
+  kualitas + awalan).
+- **Edit Auto Layout**: foto bisa di-drag untuk mengatur ulang urutan — antar sel di lembar
+  maupun thumbnail di strip (keduanya memakai array foto yang sama, jadi pratinjau, label,
+  PDF, dan cetak ikut urutan baru). Bingkai photobox berasal dari
+  `photo-studio/shared/frames.ts` (50 bingkai prosedural, 5 kategori:
+  Klasik/Polaroid/Vintage/Festif/Modern — digambar di canvas, tanpa aset eksternal) dan
+  diterapkan ke tiap foto di pratinjau, PDF, dan cetak. Garis potong putus-putus antar foto
+  (default aktif) memudahkan pemotongan setelah cetak — diteruskan ke pratinjau
+  (`A4SheetPreview`), ekspor PDF (`buildSheetDoc`), dan cetak HTML (`buildHtmlSheet`).

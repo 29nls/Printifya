@@ -17,6 +17,8 @@ export interface HtmlSheetOptions {
   labels?: string[];
   /** Ukuran font label dalam pt. */
   labelSizePt?: number;
+  /** Garis potong putus-putus antar sel (mudah dipotong setelah cetak). */
+  cutLines?: boolean;
 }
 
 /**
@@ -39,6 +41,7 @@ export function buildHtmlSheet(
     orientation = "portrait",
     labels,
     labelSizePt = 7,
+    cutLines,
   }: HtmlSheetOptions
 ): string {
   const p = getPaper(paper?.id ?? PAPER_A4.id);
@@ -72,7 +75,11 @@ export function buildHtmlSheet(
           : `<div class="empty"></div>`
       );
     }
-    pageDivs.push(`<div class="page"><div class="sheet">\n${cells.join("\n")}\n</div></div>`);
+    pageDivs.push(
+      `<div class="page"><div class="sheet${cutLines ? " cut-lines" : ""}">\n${cells.join(
+        "\n"
+      )}\n</div></div>`
+    );
   }
 
   return `<!doctype html>
@@ -129,6 +136,11 @@ export function buildHtmlSheet(
     text-overflow: ellipsis;
   }
   .sheet .empty { background: #ffffff; }
+  .sheet.cut-lines .cell,
+  .sheet.cut-lines .empty {
+    border-right: 0.25pt dashed #909090;
+    border-bottom: 0.25pt dashed #909090;
+  }
 </style>
 </head>
 <body>

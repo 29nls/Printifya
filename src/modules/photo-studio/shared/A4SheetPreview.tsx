@@ -23,6 +23,14 @@ interface A4SheetPreviewProps {
   labels?: string[];
   /** Ukuran font label pada pratinjau (px). */
   labelSizePx?: number;
+  /**
+   * Aktifkan drag antar sel: dipanggil saat foto di sel `from` dijatuhkan
+   * ke sel `to` (indeks sel, bukan indeks foto). Tanpa prop ini, sel tidak
+   * bisa di-drag (perilaku lama untuk pas foto & mode src).
+   */
+  onDropPhoto?: (from: number, to: number) => void;
+  /** Garis potong putus-putus antar sel (sekat, mudah dipotong setelah cetak). */
+  cutLines?: boolean;
 }
 
 const SCALE_MM = 2; // px per mm dasar (A4 → 420×594 px)
@@ -50,10 +58,16 @@ export default function A4SheetPreview({
   orientation = "portrait",
   labels,
   labelSizePx = 8,
+  onDropPhoto,
+  cutLines = false,
 }: A4SheetPreviewProps) {
   const p = getPaper(paper?.id ?? PAPER_A4.id);
   const d = orientedDims(p, orientation);
   const [fullSize, setFullSize] = useState(false);
+  // Drag antar sel (hanya aktif bila onDropPhoto disediakan).
+  const interactive = onDropPhoto !== undefined;
+  const [dragFrom, setDragFrom] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   // Skala agar sisi terpanjang ≤ MAX_DISPLAY px (A4 tetap ±420×594).
   const fitScale =
     Math.min(SCALE_MM, MAX_DISPLAY / Math.max(d.widthMm, d.heightMm)) * 10; // px per cm
@@ -80,7 +94,7 @@ export default function A4SheetPreview({
       style={{ width: sheetW, height: sheetH, padding: margin }}
     >
       <div
-        className="sheet-grid"
+        className={`sheet-grid${cutLines ? " cut-lines" : ""}`}
         style={{
           gridTemplateColumns: `repeat(${cols}, ${photoW}px)`,
           gridTemplateRows: `repeat(${rows}, ${photoH}px)`,
@@ -90,9 +104,65 @@ export default function A4SheetPreview({
         }}
       >
         {Array.from({ length: count }).map((_, i) => (
-          <div key={i} className="sheet-cell">
+          <div
+            key={i}
+            className={`sheet-cell${interactive ? " sheet-cell-draggable" : ""}${
+              dragOverIdx === i ? " sheet-cell-drop" : ""
+            }`}
+            draggable={interactive && !!photos[i]}
+            data-dragging={interactive ? dragFrom === i : undefined}
+            onDragStart={
+              interactive
+                ? (e) => {
+                    setDragFrom(i);
+                    setDragOverIdx(null);
+                    e.dataTransfer.effectAllowed = "move";
+                  }
+                : undefined
+            }
+            onDragOver={
+              interactive
+                ? (e) => {
+                    if (dragFrom === null || dragFrom === i) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    setDragOverIdx(i);
+                  }
+                : undefined
+            }
+            onDragLeave={
+              interactive
+                ? () => setDragOverIdx((cur) => (cur === i ? null : cur))
+                : undefined
+            }
+            onDrop={
+              interactive
+                ? (e) => {
+                    e.preventDefault();
+                    setDragOverIdx(null);
+                    if (dragFrom !== null && dragFrom !== i) {
+                      onDropPhoto(dragFrom, i);
+                    }
+                    setDragFrom(null);
+                  }
+                : undefined
+            }
+            onDragEnd={
+              interactive
+                ? () => {
+                    setDragFrom(null);
+                    setDragOverIdx(null);
+                  }
+                : undefined
+            }
+          >
             {photos[i] ? (
-              <img src={photos[i]} alt="" className="sheet-photo" />
+              <img
+                src={photos[i]}
+                alt=""
+                className="sheet-photo"
+                draggable={interactive ? false : undefined}
+              />
             ) : (
               <div className="sheet-photo sheet-photo-empty" />
             )}
