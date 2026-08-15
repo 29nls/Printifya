@@ -1,18 +1,19 @@
-import { ModulePage } from "../../../components/ModulePage";
+import PasFotoWorkflow from "../shared/PasFotoWorkflow";
+import type { PasFotoSize } from "../shared/pasFotoSize";
+
+const SIZE: PasFotoSize = {
+  id: "2x3",
+  title: "Pas Foto 2x3",
+  label: "2 × 3 cm",
+  description: "Upload foto, crop otomatis rasio 2×3, lalu pratinjau hasil cetak.",
+  icon: "🪪",
+  widthPx: 236,
+  heightPx: 354,
+  widthMm: 20,
+  heightMm: 30,
+  fileName: "pas-foto-2x3",
+};
 
 export default function PasFoto2x3Page() {
-  return (
-    <ModulePage
-      icon="🪪"
-      title="Pas Foto 2x3"
-      description="Siapkan dan cetak pas foto ukuran standar 2×3 cm dengan rasio crop otomatis."
-      features={[
-        "Unggah foto (drag & drop atau pilih file)",
-        "Crop dengan rasio tetap 2×3 (236×354 px @ 300 DPI)",
-        "Template cetak banyak salinan per halaman A4",
-        "Pratinjau cetak dengan margin dan orientasi kertas",
-        "Opsi watermark / teks logo studio",
-      ]}
-    />
-  );
+  return <PasFotoWorkflow size={SIZE} />;
 }
