@@ -57,6 +57,14 @@ const PRESETS: PasFotoSize[] = [
 
 const DEFAULT_MARGIN_CM = 0.5;
 
+const LABEL_SIZES = [
+  { value: "small", label: "Kecil", pt: 5, previewPx: 6 },
+  { value: "medium", label: "Sedang", pt: 7, previewPx: 8 },
+  { value: "large", label: "Besar", pt: 9, previewPx: 10 },
+] as const;
+
+type LabelSizeValue = (typeof LABEL_SIZES)[number]["value"];
+
 const clampInt = (raw: string, min: number, max: number) => {
   const n = Number(raw);
   if (Number.isNaN(n)) return min;
@@ -83,6 +91,8 @@ export default function AutoLayoutPage() {
   const [rows, setRows] = useState(maxRows(PRESETS[1], DEFAULT_MARGIN_CM));
   const [marginCm, setMarginCm] = useState(DEFAULT_MARGIN_CM);
   const [page, setPage] = useState(0);
+  const [showLabels, setShowLabels] = useState(false);
+  const [labelSize, setLabelSize] = useState<LabelSizeValue>("medium");
   const [exporting, setExporting] = useState(false);
   const [printing, setPrinting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -109,12 +119,17 @@ export default function AutoLayoutPage() {
   }, [totalPages]);
 
   /** Foto untuk halaman aktif: halaman penuh diisi berurutan; bila foto kurang dari sel, diulang. */
-  const pageSrcs = multiPage
-    ? photos.slice(page * count, page * count + count).map((p) => p.url)
+  const pageItems = multiPage
+    ? photos.slice(page * count, page * count + count)
     : Array.from(
         { length: count },
-        (_, i) => photos[i % photos.length]?.url
+        (_, i) => photos[i % photos.length]
       ).filter(Boolean);
+  const pageSrcs = pageItems.map((p) => p.url);
+  const pageLabels = pageItems.map((p) => p.name);
+
+  const labelSizeDef =
+    LABEL_SIZES.find((s) => s.value === labelSize) ?? LABEL_SIZES[1];
 
   const handleFiles = (files?: FileList | null) => {
     setError("");
@@ -126,7 +141,8 @@ export default function AutoLayoutPage() {
     }
     const items = list.map((f) => ({
       url: URL.createObjectURL(f),
-      name: f.name,
+      // Nama default = nama file tanpa ekstensi, bisa diedit pengguna.
+      name: f.name.replace(/\.[^.]+$/, ""),
     }));
     urlsRef.current.push(...items.map((i) => i.url));
     setPhotos((prev) => [...prev, ...items]);
@@ -152,6 +168,12 @@ export default function AutoLayoutPage() {
     setPhotos([]);
     setPage(0);
     setError("");
+  };
+
+  const updateName = (i: number, name: string) => {
+    setPhotos((prev) =>
+      prev.map((p, idx) => (idx === i ? { ...p, name } : p))
+    );
   };
 
   /** Blob URL → data URL mandiri (tahan terhadap revoke object URL). */
@@ -191,11 +213,13 @@ export default function AutoLayoutPage() {
     setError("");
     setExporting(true);
     try {
-      await exportLayoutPdf(
-        size,
-        photos.map((p) => p.url),
-        { cols, rows, marginCm }
-      );
+      await exportLayoutPdf(size, photos.map((p) => p.url), {
+        cols,
+        rows,
+        marginCm,
+        labels: showLabels ? photos.map((p) => p.name) : undefined,
+        labelSizePt: showLabels ? labelSizeDef.pt : undefined,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Gagal membuat PDF.");
     } finally {
@@ -214,10 +238,15 @@ export default function AutoLayoutPage() {
     setPrinting(true);
     try {
       // Satu gambar per sel (berurutan); mode siklus memakai isian halaman ini.
-      const srcs = multiPage
-        ? photos.map((p) => p.url)
-        : pageSrcs;
-      const html = buildHtmlSheet(srcs, size, { cols, rows, marginCm });
+      const items = multiPage ? photos : pageItems;
+      const srcs = items.map((p) => p.url);
+      const html = buildHtmlSheet(srcs, size, {
+        cols,
+        rows,
+        marginCm,
+        labels: showLabels ? items.map((p) => p.name) : undefined,
+        labelSizePt: showLabels ? labelSizeDef.pt : undefined,
+      });
       const ok = printHtmlSheet(html);
       if (!ok) {
         setError("Tidak bisa membuat iframe cetak di browser ini.");
@@ -316,6 +345,13 @@ export default function AutoLayoutPage() {
               {photos.map((p, i) => (
                 <div className="photo-item" key={i}>
                   <img src={p.url} alt={p.name} title={p.name} />
+                  <input
+                    className="photo-label-input"
+                    value={p.name}
+                    placeholder="Nama / keterangan"
+                    title="Nama / keterangan untuk sel ini"
+                    onChange={(e) => updateName(i, e.target.value)}
+                  />
                   <button
                     type="button"
                     className="photo-forward"
@@ -328,8 +364,9 @@ export default function AutoLayoutPage() {
               ))}
             </div>
             <p className="hint">
-              💡 Klik 🪪 pada thumbnail untuk meneruskan foto itu langsung ke
-              alur crop Pas Foto 3x4.
+              💡 Ketik nama/keterangan di bawah tiap foto (label muncul di
+              lembar bila diaktifkan). Klik 🪪 pada thumbnail untuk meneruskan
+              foto itu langsung ke alur crop Pas Foto 3x4.
             </p>
           </>
         )}
@@ -387,6 +424,32 @@ export default function AutoLayoutPage() {
                   }
                 />
               </label>
+              <label className="label-toggle">
+                <input
+                  type="checkbox"
+                  checked={showLabels}
+                  onChange={(e) => setShowLabels(e.target.checked)}
+                />
+                Tampilkan nama di lembar
+              </label>
+              {showLabels && (
+                <label>
+                  Ukuran label
+                  <select
+                    className="tool-select"
+                    value={labelSize}
+                    onChange={(e) =>
+                      setLabelSize(e.target.value as LabelSizeValue)
+                    }
+                  >
+                    {LABEL_SIZES.map((s) => (
+                      <option key={s.value} value={s.value}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <button
                 type="button"
                 className="btn btn-primary"
@@ -448,6 +511,8 @@ export default function AutoLayoutPage() {
               cols={cols}
               rows={rows}
               marginCm={marginCm}
+              labels={showLabels ? pageLabels : undefined}
+              labelSizePx={showLabels ? labelSizeDef.previewPx : undefined}
             />
           </section>
         </>

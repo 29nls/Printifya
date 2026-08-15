@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { setPendingPasFoto } from "../../shared/pasFotoBridge";
 import type { PasFotoSize } from "./pasFotoSize";
 import CropperEditor from "./CropperEditor";
 import A4SheetPreview from "./A4SheetPreview";
 import {
+  exportLayoutPdf,
   exportPasFotoPdf,
   fitsA4,
   maxCols,
   maxRows,
+  printLayoutPdf,
   printPasFotoPdf,
 } from "./exportPdf";
 import "./style.css";
@@ -38,6 +42,14 @@ const clampNum = (raw: string, min: number, max: number) => {
   return Math.min(max, Math.max(min, n));
 };
 
+const LABEL_SIZES = [
+  { value: "small", label: "Kecil", pt: 5, previewPx: 6 },
+  { value: "medium", label: "Sedang", pt: 7, previewPx: 8 },
+  { value: "large", label: "Besar", pt: 9, previewPx: 10 },
+] as const;
+
+type LabelSizeValue = (typeof LABEL_SIZES)[number]["value"];
+
 /** Alur lengkap pas foto: upload → crop → hasil + template cetak A4 + ekspor PDF. */
 export default function PasFotoWorkflow({
   size,
@@ -58,6 +70,15 @@ export default function PasFotoWorkflow({
     initialImage ?? null
   );
   const [croppedUrl, setCroppedUrl] = useState<string | null>(null);
+  // Mode "beberapa orang": hasil crop yang sudah disimpan, diisi ke lembar A4.
+  const [people, setPeople] = useState<{ url: string; name: string }[]>([]);
+  const [showLabels, setShowLabels] = useState(false);
+  const [labelSize, setLabelSize] = useState<LabelSizeValue>("medium");
+  // Saat diisi, crop berikutnya menggantikan orang ke-index itu (bukan menambah).
+  const [replaceIndex, setReplaceIndex] = useState<number | null>(null);
+  // Ulangi foto bila jumlah orang kurang dari jumlah sel (halaman tunggal).
+  const [repeatFill, setRepeatFill] = useState(true);
+  const [page, setPage] = useState(0);
   const [fileName, setFileName] = useState(
     initialImage ? "gambar-import.png" : ""
   );
@@ -69,8 +90,32 @@ export default function PasFotoWorkflow({
   const [exporting, setExporting] = useState(false);
   const [printing, setPrinting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
 
   const canExport = fitsA4(activeSize, cols, rows, marginCm);
+  const count = cols * rows;
+  const multiPage = people.length > count;
+  const totalPages = Math.max(1, Math.ceil(people.length / count));
+
+  // Foto untuk halaman aktif pada pratinjau: per orang bila multi-halaman;
+  // diulang bila pengguna mengaktifkan opsi ulang (halaman tunggal).
+  const pageItems =
+    multiPage || !repeatFill || people.length === 0
+      ? people.slice(page * count, page * count + count)
+      : Array.from({ length: count }, (_, i) => people[i % people.length]);
+  const pageSrcs = pageItems.map((p) => p.url);
+  const pageLabels = pageItems.map((p) => p.name);
+  // Array untuk ekspor/cetak: diulang penuh (halaman tunggal + opsi ulang),
+  // atau semua orang apa adanya (multi-halaman otomatis di exportLayoutPdf).
+  const fillItems =
+    people.length > 0 && people.length <= count && repeatFill
+      ? Array.from({ length: count }, (_, i) => people[i % people.length])
+      : people;
+  const fillSrcs = fillItems.map((p) => p.url);
+  const fillLabels = fillItems.map((p) => p.name);
+  const labelSizeDef =
+    LABEL_SIZES.find((s) => s.value === labelSize) ?? LABEL_SIZES[1];
+
   const headerInfo =
     header ?? {
       title: activeSize.title,
@@ -84,12 +129,20 @@ export default function PasFotoWorkflow({
     if (size.id === activeSize.id) return;
     setActiveSize(size);
     setCroppedUrl(null);
+    setPeople([]);
+    setReplaceIndex(null);
+    setPage(0);
     setCols(maxCols(size, DEFAULT_MARGIN_CM));
     setRows(maxRows(size, DEFAULT_MARGIN_CM));
     setError("");
     setStep(originalUrl ? "edit" : "upload");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [size]);
+
+  // Jaga halaman aktif valid bila jumlah orang / grid berubah.
+  useEffect(() => {
+    setPage((p) => Math.min(p, totalPages - 1));
+  }, [totalPages]);
 
   // Bersihkan object URL lama saat diganti / komponen dilepas.
   useEffect(() => {
@@ -124,10 +177,53 @@ export default function PasFotoWorkflow({
     if (s.id === activeSize.id) return;
     setActiveSize(s);
     setCroppedUrl(null);
+    setPeople([]);
+    setReplaceIndex(null);
+    setPage(0);
     setCols(maxCols(s, DEFAULT_MARGIN_CM));
     setRows(maxRows(s, DEFAULT_MARGIN_CM));
     setError("");
     setStep(originalUrl ? "edit" : "upload");
+  };
+
+  /** Hapus satu orang dari daftar; yang tampil menjadi orang terakhir yang tersisa. */
+  const removePerson = (i: number) => {
+    const next = people.filter((_, idx) => idx !== i);
+    setPeople(next);
+    if (next.length === 0) {
+      setCroppedUrl(null);
+      setStep("upload");
+    } else if (i === people.length - 1) {
+      // Orang yang dihapus adalah yang sedang tampil → tampilkan yang baru terakhir.
+      setCroppedUrl(next[next.length - 1].url);
+    }
+    setReplaceIndex(null);
+    setPage(0);
+  };
+
+  /** Perbarui nama/keterangan satu orang. */
+  const updateName = (i: number, name: string) => {
+    setPeople((prev) =>
+      prev.map((p, idx) => (idx === i ? { ...p, name } : p))
+    );
+  };
+
+  /** Commit hasil crop: ganti orang terakhir (Edit Ulang / Foto Lain) atau tambah orang baru. */
+  const applyCrop = (url: string) => {
+    // Nama default dari nama file (tanpa ekstensi), bisa diedit di strip.
+    const name = fileName.replace(/\.[^.]+$/, "") || `Orang ${people.length + 1}`;
+    setPeople((prev) => {
+      const next = [...prev];
+      if (replaceIndex !== null && replaceIndex < next.length) {
+        next[replaceIndex] = { url, name };
+      } else {
+        next.push({ url, name });
+      }
+      return next;
+    });
+    setCroppedUrl(url);
+    setReplaceIndex(null);
+    setStep("result");
   };
 
   const download = () => {
@@ -138,12 +234,29 @@ export default function PasFotoWorkflow({
     a.click();
   };
 
+  /** Teruskan hasil (data URL) ke alur crop Pas Foto 3x4 via bridge antar modul. */
+  const forwardTo3x4 = () => {
+    if (!croppedUrl) return;
+    setPendingPasFoto(croppedUrl);
+    navigate("/photo-studio/pas-foto-3x4");
+  };
+
   const handleExportPdf = async () => {
     if (!croppedUrl || !canExport || exporting) return;
     setError("");
     setExporting(true);
     try {
-      await exportPasFotoPdf(activeSize, croppedUrl, { cols, rows, marginCm });
+      if (people.length <= 1) {
+        await exportPasFotoPdf(activeSize, croppedUrl, { cols, rows, marginCm });
+      } else {
+        await exportLayoutPdf(activeSize, fillSrcs, {
+          cols,
+          rows,
+          marginCm,
+          labels: showLabels ? fillLabels : undefined,
+          labelSizePt: showLabels ? labelSizeDef.pt : undefined,
+        });
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Gagal membuat PDF.");
     } finally {
@@ -156,11 +269,20 @@ export default function PasFotoWorkflow({
     setError("");
     setPrinting(true);
     try {
-      const allowed = await printPasFotoPdf(activeSize, croppedUrl, {
-        cols,
-        rows,
-        marginCm,
-      });
+      const allowed =
+        people.length <= 1
+          ? await printPasFotoPdf(activeSize, croppedUrl, {
+              cols,
+              rows,
+              marginCm,
+            })
+          : await printLayoutPdf(activeSize, fillSrcs, {
+              cols,
+              rows,
+              marginCm,
+              labels: showLabels ? fillLabels : undefined,
+              labelSizePt: showLabels ? labelSizeDef.pt : undefined,
+            });
       if (!allowed) {
         setError(
           "Popup diblokir browser. Izinkan pop-up untuk membuka dialog cetak."
@@ -206,6 +328,24 @@ export default function PasFotoWorkflow({
 
       {step === "upload" && (
         <section className="panel upload-section">
+          {people.length > 0 && (
+            <div className="people-summary">
+              <span>
+                👥 <strong>{people.length}</strong> orang sudah dicrop dan
+                tersimpan di lembar A4.
+              </span>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setReplaceIndex(null);
+                  setStep("result");
+                }}
+              >
+                ⬅️ Lihat Hasil
+              </button>
+            </div>
+          )}
           <div
             className={dragOver ? "upload-zone dragging" : "upload-zone"}
             role="button"
@@ -245,7 +385,10 @@ export default function PasFotoWorkflow({
               {activeSize.widthPx} × {activeSize.heightPx} px @{" "}
               {activeSize.dpi ?? 300} DPI
             </strong>{" "}
-            — ukuran cetak {activeSize.label}, siap cetak di printer biasa.
+            — ukuran cetak {activeSize.label}, siap cetak di printer biasa.{" "}
+            {people.length > 0
+              ? "Upload foto orang berikutnya untuk ditambahkan ke lembar."
+              : "Setelah crop, foto bisa ditambahkan ke lembar bersama orang lain (mode beberapa orang)."}
           </p>
         </section>
       )}
@@ -257,10 +400,7 @@ export default function PasFotoWorkflow({
           src={originalUrl}
           fileName={fileName}
           onCancel={() => setStep("upload")}
-          onApply={(url) => {
-            setCroppedUrl(url);
-            setStep("result");
-          }}
+          onApply={applyCrop}
         />
       )}
 
@@ -283,7 +423,12 @@ export default function PasFotoWorkflow({
             </div>
 
             <div className="result-info">
-              <h2>Hasil Pas Foto</h2>
+              <h2>
+                Hasil Pas Foto
+                {people.length > 1 && (
+                  <span className="people-count"> · {people.length} orang</span>
+                )}
+              </h2>
               <ul className="info-list">
                 <li>
                   <span>Jenis</span>
@@ -313,18 +458,98 @@ export default function PasFotoWorkflow({
                 <button type="button" className="btn btn-primary" onClick={download}>
                   ⬇️ Unduh PNG
                 </button>
-                <button type="button" className="btn" onClick={() => setStep("edit")}>
+                {activeSize.id !== "3x4" && (
+                  <button
+                    type="button"
+                    className="btn"
+                    title="Bawa foto ini langsung ke alur crop Pas Foto 3x4"
+                    onClick={forwardTo3x4}
+                  >
+                    🪪 Jadikan Pas Foto 3x4
+                  </button>
+                )}
+                <button type="button" className="btn btn-primary" onClick={() => setStep("upload")}>
+                  ➕ Crop Orang Lain
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    setReplaceIndex(people.length - 1);
+                    setStep("edit");
+                  }}
+                >
                   ✏️ Edit Ulang
                 </button>
-                <button type="button" className="btn" onClick={() => setStep("upload")}>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    setReplaceIndex(people.length - 1);
+                    setStep("upload");
+                  }}
+                >
                   🔄 Foto Lain
                 </button>
               </div>
+
+              {people.length > 1 && (
+                <div className="people-strip">
+                  {people.map((p, i) => (
+                    <div className="people-item" key={i}>
+                      <img src={p.url} alt={p.name} title={p.name} />
+                      <input
+                        className="people-name-input"
+                        value={p.name}
+                        placeholder="Nama / keterangan"
+                        title="Nama / keterangan untuk sel ini"
+                        onChange={(e) => updateName(i, e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="remove-person"
+                        title="Hapus dari lembar"
+                        onClick={() => removePerson(i)}
+                      >
+                        ✕
+                      </button>
+                      <span className="people-index">{i + 1}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
           <section className="panel sheet-section">
-            <h2>Pratinjau Template Cetak A4</h2>
+            <div className="sheet-head">
+              <h2>Pratinjau Template Cetak A4</h2>
+              {multiPage && (
+                <div className="page-nav">
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={page === 0}
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  >
+                    ◀
+                  </button>
+                  <span>
+                    Halaman {page + 1} dari {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={page >= totalPages - 1}
+                    onClick={() =>
+                      setPage((p) => Math.min(totalPages - 1, p + 1))
+                    }
+                  >
+                    ▶
+                  </button>
+                </div>
+              )}
+            </div>
 
             <div className="sheet-settings">
               <label>
@@ -358,6 +583,44 @@ export default function PasFotoWorkflow({
                   onChange={(e) => setMarginCm(clampNum(e.target.value, 0.2, 1.5))}
                 />
               </label>
+              {people.length > 1 && !multiPage && (
+                <label className="repeat-toggle">
+                  <input
+                    type="checkbox"
+                    checked={repeatFill}
+                    onChange={(e) => setRepeatFill(e.target.checked)}
+                  />
+                  Ulangi bila foto kurang dari sel
+                </label>
+              )}
+              {people.length > 1 && (
+                <label className="repeat-toggle">
+                  <input
+                    type="checkbox"
+                    checked={showLabels}
+                    onChange={(e) => setShowLabels(e.target.checked)}
+                  />
+                  Tampilkan nama di lembar
+                </label>
+              )}
+              {showLabels && people.length > 1 && (
+                <label>
+                  Ukuran label
+                  <select
+                    className="tool-select"
+                    value={labelSize}
+                    onChange={(e) =>
+                      setLabelSize(e.target.value as LabelSizeValue)
+                    }
+                  >
+                    {LABEL_SIZES.map((s) => (
+                      <option key={s.value} value={s.value}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <button
                 type="button"
                 className="btn btn-primary"
@@ -387,10 +650,15 @@ export default function PasFotoWorkflow({
 
             <A4SheetPreview
               size={activeSize}
-              src={croppedUrl}
+              src={people.length <= 1 ? croppedUrl : undefined}
+              srcs={people.length > 1 ? pageSrcs : undefined}
               cols={cols}
               rows={rows}
               marginCm={marginCm}
+              labels={people.length > 1 && showLabels ? pageLabels : undefined}
+              labelSizePx={
+                people.length > 1 && showLabels ? labelSizeDef.previewPx : undefined
+              }
             />
           </section>
         </div>

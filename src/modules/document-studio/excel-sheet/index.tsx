@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { printHtmlSheet } from "../../print-center/printer-lokal/printHtml";
 import {
   buildCsv,
@@ -7,6 +7,8 @@ import {
   COLS,
   colHeader,
   ROWS,
+  SHEET_NAMES,
+  type SheetGrid,
 } from "./spreadsheet";
 import "../../photo-studio/shared/style.css";
 import "./style.css";
@@ -18,67 +20,145 @@ function emptyGrid(): string[][] {
 const clamp = (v: number, min: number, max: number) =>
   Math.min(max, Math.max(min, v));
 
+const NUMBER_FORMATS = [
+  { value: "", label: "Umum" },
+  { value: "0", label: "0 (bulat)" },
+  { value: "0.0", label: "1 desimal" },
+  { value: "0.00", label: "2 desimal" },
+  { value: "0.0%", label: "Persen (%)" },
+  { value: "#,##0", label: "Ribuan" },
+  { value: "dd/mm/yyyy", label: "Tanggal (dd/mm/yyyy)" },
+  { value: "dd/mm/yyyy hh:mm", label: "Tanggal & jam" },
+];
+
 export default function ExcelSheetPage() {
-  const [grid, setGrid] = useState<string[][]>(emptyGrid);
-  const [sel, setSel] = useState({ r: 0, c: 0 });
+  const [grids, setGrids] = useState<SheetGrid[]>(() => [
+    emptyGrid(),
+    emptyGrid(),
+  ]);
+  const [activeSheet, setActiveSheet] = useState(0);
+  const [formats, setFormats] = useState<Record<string, string>>({});
+  const [sel, setSel] = useState<Record<number, { r: number; c: number }>>({
+    0: { r: 0, c: 0 },
+    1: { r: 0, c: 0 },
+  });
+  const [extent, setExtent] = useState<Record<number, { r: number; c: number }>>({
+    0: { r: 0, c: 0 },
+    1: { r: 0, c: 0 },
+  });
   const [editing, setEditing] = useState<{ r: number; c: number } | null>(null);
   const [fx, setFx] = useState("");
   const [error, setError] = useState("");
   const [printing, setPrinting] = useState(false);
   const gridRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef(false);
 
-  // Nilai tampilan semua sel (formula dievaluasi sekali per perubahan grid).
+  const cur = sel[activeSheet] ?? { r: 0, c: 0 };
+
+  // Rentang terpilih (ternormalisasi) pada lembar aktif.
+  const range = (() => {
+    const a = sel[activeSheet] ?? { r: 0, c: 0 };
+    const b = extent[activeSheet] ?? a;
+    return {
+      r1: Math.min(a.r, b.r),
+      r2: Math.max(a.r, b.r),
+      c1: Math.min(a.c, b.c),
+      c2: Math.max(a.c, b.c),
+    };
+  })();
+  const isMulti = range.r1 !== range.r2 || range.c1 !== range.c2;
+
+  // Hentikan drag saat tombol mouse dilepas di mana pun.
+  useEffect(() => {
+    const up = () => {
+      draggingRef.current = false;
+    };
+    window.addEventListener("mouseup", up);
+    return () => window.removeEventListener("mouseup", up);
+  }, []);
+
+  // Nilai tampilan semua sel tiap lembar (formula dievaluasi sekali per perubahan).
   const display = useMemo(() => {
-    const m: string[][] = [];
-    for (let r = 0; r < ROWS; r++) {
-      m.push([]);
-      for (let c = 0; c < COLS; c++) {
-        m[r].push(cellDisplay(grid[r][c], grid));
+    return grids.map((g, s) => {
+      const m: string[][] = [];
+      for (let r = 0; r < ROWS; r++) {
+        m.push([]);
+        for (let c = 0; c < COLS; c++) {
+          m[r].push(cellDisplay(g[r][c], grids, s, formats[`${s},${r},${c}`]));
+        }
       }
-    }
-    return m;
-  }, [grid]);
+      return m;
+    });
+  }, [grids, formats]);
+
+  const applyFormat = (fmt: string) => {
+    const { r1, r2, c1, c2 } = range;
+    setFormats((prev) => {
+      const next = { ...prev };
+      for (let r = r1; r <= r2; r++) {
+        for (let c = c1; c <= c2; c++) {
+          const key = `${activeSheet},${r},${c}`;
+          if (fmt === "" || fmt === "general") delete next[key];
+          else next[key] = fmt;
+        }
+      }
+      return next;
+    });
+  };
 
   const setCell = (r: number, c: number, v: string) => {
-    setGrid((prev) => {
-      const next = prev.map((row) => [...row]);
-      next[r][c] = v;
+    setGrids((prev) => {
+      const next = prev.map((g) => g.map((row) => [...row]));
+      next[activeSheet][r][c] = v;
       return next;
     });
   };
 
   const selectCell = (r: number, c: number) => {
-    setSel({ r, c });
+    setSel((prev) => ({ ...prev, [activeSheet]: { r, c } }));
+    setExtent((prev) => ({ ...prev, [activeSheet]: { r, c } }));
     setEditing(null);
-    setFx(grid[r][c]);
+    setFx(grids[activeSheet][r][c]);
     gridRef.current?.focus();
+  };
+
+  const extendTo = (r: number, c: number) => {
+    setExtent((prev) => ({ ...prev, [activeSheet]: { r, c } }));
   };
 
   const commitFx = () => {
     // Bar formula: commit ke sel terpilih; mode in-cell: commit ke sel yang diedit.
-    const target = editing ?? sel;
+    const target = editing ?? cur;
     setCell(target.r, target.c, fx);
     setEditing(null);
   };
 
   const cancelFx = () => {
-    setFx(grid[sel.r][sel.c]);
+    setFx(grids[activeSheet][cur.r][cur.c]);
     setEditing(null);
   };
 
   const startEdit = (r: number, c: number) => {
-    setSel({ r, c });
+    setSel((prev) => ({ ...prev, [activeSheet]: { r, c } }));
+    setExtent((prev) => ({ ...prev, [activeSheet]: { r, c } }));
     setEditing({ r, c });
-    setFx(grid[r][c]);
+    setFx(grids[activeSheet][r][c]);
   };
 
-  const clearCell = () => {
-    setCell(sel.r, sel.c, "");
+  const clearRange = () => {
+    const { r1, r2, c1, c2 } = range;
+    setGrids((prev) => {
+      const next = prev.map((g) => g.map((row) => [...row]));
+      for (let r = r1; r <= r2; r++) {
+        for (let c = c1; c <= c2; c++) next[activeSheet][r][c] = "";
+      }
+      return next;
+    });
     setFx("");
   };
 
   const move = (dr: number, dc: number) => {
-    selectCell(clamp(sel.r + dr, 0, ROWS - 1), clamp(sel.c + dc, 0, COLS - 1));
+    selectCell(clamp(cur.r + dr, 0, ROWS - 1), clamp(cur.c + dc, 0, COLS - 1));
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -88,47 +168,71 @@ export default function ExcelSheetPage() {
       case "ArrowDown": e.preventDefault(); move(1, 0); break;
       case "ArrowLeft": e.preventDefault(); move(0, -1); break;
       case "ArrowRight": e.preventDefault(); move(0, 1); break;
-      case "Delete": case "Backspace": e.preventDefault(); clearCell(); break;
-      case "Enter": e.preventDefault(); startEdit(sel.r, sel.c); break;
-      case "F2": e.preventDefault(); startEdit(sel.r, sel.c); break;
+      case "Delete": case "Backspace": e.preventDefault(); clearRange(); break;
+      case "Enter": e.preventDefault(); startEdit(cur.r, cur.c); break;
+      case "F2": e.preventDefault(); startEdit(cur.r, cur.c); break;
     }
   };
 
-  const loadExample = () => {
-    const g = emptyGrid();
-    g[0][0] = "10";
-    g[1][0] = "20";
-    g[2][0] = "30";
-    g[3][0] = "=SUM(A1:A3)";
-    g[0][1] = "=A1*2";
-    g[1][1] = "=AVERAGE(A1:A3)";
-    g[2][1] = "=A3/0";
-    g[3][1] = "=MAX(A1:A3)";
-    g[0][2] = "Nama";
-    g[1][2] = "Andi";
-    g[2][2] = "Budi";
-    setGrid(g);
-    setSel({ r: 0, c: 0 });
+  const switchSheet = (i: number) => {
+    setActiveSheet(i);
     setEditing(null);
-    setFx(g[0][0]);
+    const pos = sel[i] ?? { r: 0, c: 0 };
+    setFx(grids[i][pos.r][pos.c]);
+    gridRef.current?.focus();
+  };
+
+  const loadExample = () => {
+    const g = [emptyGrid(), emptyGrid()];
+    // Sheet1: data dasar + ROUND
+    g[0][0][0] = "10";
+    g[0][1][0] = "20";
+    g[0][2][0] = "30";
+    g[0][3][0] = "=SUM(A1:A3)";
+    g[0][0][1] = "=A1*2";
+    g[0][1][1] = "=AVERAGE(A1:A3)";
+    g[0][2][1] = "=A3/0";
+    g[0][3][1] = "=MAX(A1:A3)";
+    g[0][0][2] = "Nama";
+    g[0][1][2] = "Andi";
+    g[0][2][2] = "Budi";
+    g[0][0][3] = "=ROUND(3.14159,2)";
+    // Sheet2: referensi antar-lembar + tanggal
+    g[1][0][0] = "=Sheet1!A3";
+    g[1][1][0] = "=SUM(Sheet1!A1:A3)";
+    g[1][2][0] = "=Sheet1!A1+Sheet1!A2";
+    g[1][0][1] = "=TODAY()";
+    g[1][1][1] = "=NOW()";
+    setGrids(g);
+    setFormats({});
+    setSel({ 0: { r: 0, c: 0 }, 1: { r: 0, c: 0 } });
+    setExtent({ 0: { r: 0, c: 0 }, 1: { r: 0, c: 0 } });
+    setActiveSheet(0);
+    setEditing(null);
+    setFx(g[0][0][0]);
     setError("");
   };
 
   const resetGrid = () => {
-    setGrid(emptyGrid());
-    setSel({ r: 0, c: 0 });
+    setGrids([emptyGrid(), emptyGrid()]);
+    setFormats({});
+    setSel({ 0: { r: 0, c: 0 }, 1: { r: 0, c: 0 } });
+    setExtent({ 0: { r: 0, c: 0 }, 1: { r: 0, c: 0 } });
+    setActiveSheet(0);
     setEditing(null);
     setFx("");
     setError("");
   };
 
+  const getFormat = (r: number, c: number) => formats[`${activeSheet},${r},${c}`];
+
   const handleCsv = () => {
-    const csv = buildCsv(grid);
+    const csv = buildCsv(grids, activeSheet, getFormat);
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "spreadsheet.csv";
+    a.download = `spreadsheet-${SHEET_NAMES[activeSheet].toLowerCase()}.csv`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
@@ -138,7 +242,7 @@ export default function ExcelSheetPage() {
     setError("");
     setPrinting(true);
     try {
-      const html = buildSheetHtml(grid);
+      const html = buildSheetHtml(grids, activeSheet, getFormat);
       const ok = printHtmlSheet(html);
       if (!ok) setError("Tidak bisa membuat iframe cetak di browser ini.");
     } catch (e) {
@@ -155,8 +259,9 @@ export default function ExcelSheetPage() {
         <div>
           <h1>Excel Sheet</h1>
           <p>
-            Spreadsheet sederhana dengan formula dasar (SUM, AVERAGE, MIN, MAX,
-            COUNT, aritmatika &amp; referensi A1), ekspor CSV, dan cetak.
+            Spreadsheet dengan 2 lembar (referensi antar-lembar mis.{" "}
+            <code>Sheet2!A1</code>), formula (SUM, AVERAGE, IF, ROUND, TODAY,
+            NOW, …), format angka/tanggal, ekspor CSV, dan cetak.
           </p>
         </div>
       </header>
@@ -183,11 +288,44 @@ export default function ExcelSheetPage() {
           </button>
         </div>
 
+        <div className="sheet-tabs" role="tablist">
+          {SHEET_NAMES.map((name, i) => (
+            <button
+              key={name}
+              type="button"
+              role="tab"
+              aria-selected={i === activeSheet}
+              className={i === activeSheet ? "sheet-tab active" : "sheet-tab"}
+              onClick={() => switchSheet(i)}
+            >
+              📄 {name}
+            </button>
+          ))}
+        </div>
+
+        <div className="format-row">
+          <span className="format-label">
+            Format {colHeader(range.c1)}{range.r1 + 1}
+            {isMulti ? `:${colHeader(range.c2)}${range.r2 + 1}` : ""}:
+          </span>
+          <select
+            className="tool-select"
+            value={formats[`${activeSheet},${cur.r},${cur.c}`] ?? ""}
+            onChange={(e) => applyFormat(e.target.value)}
+          >
+            {NUMBER_FORMATS.map((f) => (
+              <option key={f.value || "general"} value={f.value}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <div className="formula-bar">
           <span className="fx-badge">fx</span>
           <input
             value={fx}
-            placeholder="Ketik nilai atau formula, mis. =SUM(A1:A3), lalu Enter"
+            placeholder="Ketik nilai atau formula, mis. =SUM(A1:A3) atau =Sheet2!B1, lalu Enter"
             onChange={(e) => setFx(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") commitFx();
@@ -202,7 +340,17 @@ export default function ExcelSheetPage() {
           tabIndex={0}
           onKeyDown={onKeyDown}
         >
-          <table className="sheet-grid">
+          <table
+            className="sheet-grid"
+            onMouseMove={(e) => {
+              if (!draggingRef.current) return;
+              const td = (e.target as Element).closest("td");
+              if (!td) return;
+              const r = Number(td.getAttribute("data-r"));
+              const c = Number(td.getAttribute("data-c"));
+              if (Number.isFinite(r) && Number.isFinite(c)) extendTo(r, c);
+            }}
+          >
             <thead>
               <tr>
                 <th className="corner"></th>
@@ -216,18 +364,34 @@ export default function ExcelSheetPage() {
                 <tr key={r}>
                   <th className="row-head">{r + 1}</th>
                   {Array.from({ length: COLS }, (_, c) => {
-                    const isSel = sel.r === r && sel.c === c;
+                    const inRng =
+                      r >= range.r1 && r <= range.r2 &&
+                      c >= range.c1 && c <= range.c2;
+                    const isAnchor = cur.r === r && cur.c === c;
                     const isEdit = editing?.r === r && editing?.c === c;
-                    const val = display[r][c];
+                    const val = display[activeSheet][r][c];
                     const isNumber = /^-?\d/.test(val);
                     return (
                       <td
                         key={c}
+                        data-r={r}
+                        data-c={c}
                         className={
-                          (isSel ? "selected " : "") + (isNumber ? "num" : "")
+                          (isAnchor
+                            ? "selected "
+                            : inRng
+                              ? "range "
+                              : "") + (isNumber ? "num" : "")
                         }
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => selectCell(r, c)}
+                        onMouseDown={(e) => {
+                          if (e.button !== 0) return;
+                          e.preventDefault();
+                          selectCell(r, c);
+                          draggingRef.current = true;
+                        }}
+                        onClick={(e) => {
+                          if (e.shiftKey) extendTo(r, c);
+                        }}
                         onDoubleClick={() => startEdit(r, c)}
                       >
                         {isEdit ? (
@@ -266,11 +430,17 @@ export default function ExcelSheetPage() {
 
         {error && <p className="error">{error}</p>}
         <p className="hint">
-          💡 Klik sel untuk memilih, ketik di bar formula lalu Enter, atau
-          klik dua kali sel untuk mengedit langsung. Navigasi: panah, Delete,
-          Enter, F2. Fungsi: SUM, AVERAGE, MIN, MAX, COUNT + rentang (A1:B3).
-          Error umum: <code>#DIV/0!</code> (bagi nol), <code>#ERROR!</code>{" "}
-          (sintaks / siklus).
+          💡 Klik sel untuk memilih, <strong>seret</strong> (drag) untuk memilih
+          rentang, atau <strong>Shift+klik</strong> untuk memperluas dari sel
+          awal. Format di atas berlaku ke seluruh rentang terpilih; Delete /
+          Backspace mengosongkan rentang. Ketik di bar formula lalu Enter, atau
+          klik dua kali sel untuk mengedit langsung. Navigasi: panah, Enter, F2.
+          Referensi antar-lembar: <code>Sheet2!A1</code> /{" "}
+          <code>SUM(Sheet2!A1:B3)</code>. Fungsi: SUM, AVERAGE, MIN, MAX, COUNT,
+          IF, CONCATENATE, LEN, ROUND, TODAY, NOW. TODAY/NOW tampil sebagai
+          tanggal lewat format <em>Tanggal</em>. Error umum:{" "}
+          <code>#DIV/0!</code> (bagi nol), <code>#ERROR!</code> (sintaks /
+          siklus, termasuk lintas lembar).
         </p>
       </section>
     </div>

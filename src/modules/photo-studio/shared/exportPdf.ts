@@ -5,6 +5,10 @@ export interface PdfSheetOptions {
   cols: number;
   rows: number;
   marginCm: number;
+  /** Label per foto (indeks sejajar dengan dataUrls); digambar di dasar tiap sel. */
+  labels?: string[];
+  /** Ukuran font label dalam pt. */
+  labelSizePt?: number;
 }
 
 const PAGE_W_MM = 210; // A4
@@ -78,7 +82,7 @@ function toJpegOnWhite(dataUrl: string): Promise<string> {
 async function buildSheetDoc(
   size: PasFotoSize,
   dataUrls: string | string[],
-  { cols, rows, marginCm }: PdfSheetOptions,
+  { cols, rows, marginCm, labels, labelSizePt }: PdfSheetOptions,
   autoPrint: boolean
 ): Promise<jsPDF> {
   if (!fitsA4(size, cols, rows, marginCm)) {
@@ -98,20 +102,30 @@ async function buildSheetDoc(
 
   const count = cols * rows;
   const pages = Math.max(1, Math.ceil(jpegs.length / count));
+  const labelSize = labelSizePt ?? 7;
 
   for (let page = 0; page < pages; page++) {
     if (page > 0) doc.addPage();
     for (let i = 0; i < count; i++) {
       const idx = page * count + i;
       if (idx >= jpegs.length) break; // halaman terakhir boleh tidak penuh
-      doc.addImage(
-        jpegs[idx],
-        "JPEG",
-        marginX + (i % cols) * size.widthMm,
-        marginY + Math.floor(i / cols) * size.heightMm,
-        size.widthMm,
-        size.heightMm
-      );
+      const x = marginX + (i % cols) * size.widthMm;
+      const y = marginY + Math.floor(i / cols) * size.heightMm;
+      doc.addImage(jpegs[idx], "JPEG", x, y, size.widthMm, size.heightMm);
+
+      const label = labels?.[idx];
+      if (label) {
+        const barH = labelSize * 0.55 + 1; // mm
+        const barY = y + size.heightMm - barH;
+        doc.setFillColor(0, 0, 0);
+        doc.rect(x, barY, size.widthMm, barH, "F");
+        doc.setFontSize(labelSize);
+        doc.setTextColor(255, 255, 255);
+        const line = doc.splitTextToSize(label, size.widthMm - 2)[0] ?? "";
+        doc.text(line, x + size.widthMm / 2, barY + barH - 0.8, {
+          align: "center",
+        });
+      }
     }
   }
 
@@ -149,6 +163,24 @@ export async function printPasFotoPdf(
   options: PdfSheetOptions
 ): Promise<boolean> {
   const doc = await buildSheetDoc(size, dataUrl, options, true);
+  const blob = doc.output("blob");
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, "_blank");
+  // Biarkan viewer sempat memuat PDF sebelum URL di-revoke.
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return win !== null;
+}
+
+/**
+ * Buka PDF layout (banyak orang) di tab baru dan memicu dialog cetak browser.
+ * Mengembalikan `false` jika pop-up diblokir.
+ */
+export async function printLayoutPdf(
+  size: PasFotoSize,
+  srcs: string[],
+  options: PdfSheetOptions
+): Promise<boolean> {
+  const doc = await buildSheetDoc(size, srcs, options, true);
   const blob = doc.output("blob");
   const url = URL.createObjectURL(blob);
   const win = window.open(url, "_blank");

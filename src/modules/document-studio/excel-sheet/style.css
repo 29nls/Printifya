@@ -12,6 +12,54 @@
   flex: 1;
 }
 
+/* ---------- Format angka ---------- */
+
+.format-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.format-label {
+  font-weight: 500;
+}
+
+/* ---------- Tab lembar ---------- */
+
+.sheet-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.sheet-tab {
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px 8px 0 0;
+  border-bottom: none;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.sheet-tab:hover {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.sheet-tab.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
 /* ---------- Formula bar ---------- */
 
 .formula-bar {
@@ -112,6 +160,10 @@
   outline: 2px solid var(--accent);
   outline-offset: -2px;
   background: var(--accent-soft);
+}
+
+.sheet-grid td.range {
+  background: rgba(79, 70, 229, 0.08);
 }
 
 .sheet-grid td.num {

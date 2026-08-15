@@ -4,6 +4,10 @@ export interface HtmlSheetOptions {
   cols: number;
   rows: number;
   marginCm: number;
+  /** Label per foto (indeks sejajar dengan src); digambar di dasar tiap sel. */
+  labels?: string[];
+  /** Ukuran font label dalam pt. */
+  labelSizePt?: number;
 }
 
 const PAGE_W_MM = 210; // A4
@@ -20,7 +24,7 @@ const PAGE_H_MM = 297; // A4
 export function buildHtmlSheet(
   src: string | string[],
   size: PasFotoSize,
-  { cols, rows, marginCm }: HtmlSheetOptions
+  { cols, rows, marginCm, labels, labelSizePt = 7 }: HtmlSheetOptions
 ): string {
   const gridW = size.widthMm * cols;
   const gridH = size.heightMm * rows;
@@ -38,9 +42,16 @@ export function buildHtmlSheet(
     const cells: string[] = [];
     for (let i = 0; i < count; i++) {
       const idx = p * count + i;
+      const label = labels?.[idx];
       cells.push(
         idx < srcs.length
-          ? `<img src="${srcs[idx]}" alt="" />`
+          ? `<div class="cell"><img src="${srcs[idx]}" alt="" />${
+              label
+                ? `<span class="label" style="font-size:${labelSizePt}pt">${escapeHtml(
+                    label
+                  )}</span>`
+                : ""
+            }</div>`
           : `<div class="empty"></div>`
       );
     }
@@ -75,11 +86,30 @@ export function buildHtmlSheet(
     grid-template-rows: repeat(${rows}, ${size.heightMm}mm);
     gap: 0;
   }
+  .sheet .cell {
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
   .sheet img {
     width: 100%;
     height: 100%;
     object-fit: cover;
     display: block;
+  }
+  .sheet .label {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    text-align: center;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.55);
+    padding: 0.4pt 1pt;
+    line-height: 1.3;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
   .sheet .empty { background: #ffffff; }
 </style>
@@ -94,6 +124,19 @@ ${pageDivs.join("\n")}
  * Cetak dokumen HTML lewat iframe tersembunyi + dialog print browser.
  * Mengembalikan `false` bila iframe tidak tersedia (jarang terjadi).
  */
+/** Escape HTML untuk teks label (masukan pengguna). */
+function escapeHtml(s: string): string {
+  return s.replace(/[<>&"]/g, (ch) =>
+    ch === "<"
+      ? "&lt;"
+      : ch === ">"
+        ? "&gt;"
+        : ch === "&"
+          ? "&amp;"
+          : "&quot;"
+  );
+}
+
 export function printHtmlSheet(html: string): boolean {
   const iframe = document.createElement("iframe");
   iframe.style.position = "fixed";

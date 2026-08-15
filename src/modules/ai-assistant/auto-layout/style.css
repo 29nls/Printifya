@@ -10,8 +10,8 @@
 }
 
 .photo-strip img {
-  width: 64px;
-  height: 64px;
+  width: 96px;
+  height: 96px;
   object-fit: cover;
   border-radius: 8px;
   border: 1px solid var(--border);
@@ -21,6 +21,25 @@
 .photo-item {
   position: relative;
   line-height: 0;
+}
+
+.photo-label-input {
+  display: block;
+  width: 96px;
+  margin-top: 6px;
+  padding: 4px 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.photo-label-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
 }
 
 .photo-forward {
@@ -49,6 +68,26 @@
 .file-row-actions {
   display: flex;
   gap: 8px;
+}
+
+/* ---------- Toggle label di lembar ---------- */
+
+.label-toggle {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 7px !important;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.label-toggle input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
 }
 
 /* ---------- Kepala pratinjau + navigasi halaman ---------- */

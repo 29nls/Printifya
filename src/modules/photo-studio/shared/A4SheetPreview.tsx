@@ -9,6 +9,10 @@ interface A4SheetPreviewProps {
   cols: number;
   rows: number;
   marginCm?: number;
+  /** Label per foto (indeks sejajar dengan `srcs`); ditampilkan bila diisi. */
+  labels?: string[];
+  /** Ukuran font label pada pratinjau (px). */
+  labelSizePx?: number;
 }
 
 const SCALE = 20; // px per cm (lembar 420×594 px = A4 21×29,7 cm)
@@ -28,6 +32,8 @@ export default function A4SheetPreview({
   cols,
   rows,
   marginCm = 0.5,
+  labels,
+  labelSizePx = 8,
 }: A4SheetPreviewProps) {
   const count = cols * rows;
   const photoW = (size.widthMm / 10) * SCALE;
@@ -55,13 +61,20 @@ export default function A4SheetPreview({
             height: innerH,
           }}
         >
-          {Array.from({ length: count }).map((_, i) =>
-            photos[i] ? (
-              <img key={i} src={photos[i]} alt="" className="sheet-photo" />
-            ) : (
-              <div key={i} className="sheet-photo sheet-photo-empty" />
-            )
-          )}
+          {Array.from({ length: count }).map((_, i) => (
+            <div key={i} className="sheet-cell">
+              {photos[i] ? (
+                <img src={photos[i]} alt="" className="sheet-photo" />
+              ) : (
+                <div className="sheet-photo sheet-photo-empty" />
+              )}
+              {labels?.[i] && (
+                <span className="sheet-label" style={{ fontSize: labelSizePx }}>
+                  {labels[i]}
+                </span>
+              )}
+            </div>
+          ))}
         </div>
       </div>
       <p className="sheet-caption">
