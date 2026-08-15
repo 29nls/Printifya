@@ -39,8 +39,11 @@ interface Item {
   /** Skala & format yang benar-benar dipakai saat proses (untuk nama file). */
   usedScale?: number;
   usedFormat?: OutFormat;
-  /** Ukuran + PSNR tiap format (PNG/WebP/JPG) untuk perbandingan kualitas. */
+  /** Ukuran + PSNR tiap format (PNG/WebP/JPG) untuk perbandingan kualitas.
+   *  Dihitung on-demand saat tabel "📊 Format" dibuka, lalu di-cache. */
   formats?: FormatStat[];
+  /** Kanvas hasil — sumber perbandingan format; dibuang setelah dipakai. */
+  resultCanvas?: HTMLCanvasElement | null;
   error?: string;
 }
 
@@ -91,6 +94,12 @@ export default function UpscaleDenoisePage() {
   const [dlProgress, setDlProgress] = useState(0);
   const [compareId, setCompareId] = useState<string | null>(null);
   const [showFormats, setShowFormats] = useState<string | null>(null);
+  /** Id item yang sedang dihitung perbandingan formatnya (indikator loading).
+   *  Set per-id agar komputasi tiap item hanya satu (guard tidak bisa
+   *  dikelabui komputasi paralel item lain). */
+  const [formatLoading, setFormatLoading] = useState<ReadonlySet<string>>(
+    () => new Set()
+  );
   const [split, setSplit] = useState(50);
   const [error, setError] = useState("");
   /** Awalan nama default saat hasil dikirim ke Auto Layout (label lembar). */
@@ -98,16 +107,31 @@ export default function UpscaleDenoisePage() {
   const [forwarding, setForwarding] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const urlsRef = useRef<string[]>([]);
+  /** Pembatalan batch: disetel saat unmount agar loop tidak melanjutkan
+   *  pemrosesan / update state setelah modul ditutup (pola cancelled flag). */
+  const cancelledRef = useRef(false);
   const navigate = useNavigate();
 
   const scale = SCALE_PRESETS.find((s) => s.id === scaleId)?.value ?? customScale;
 
   useEffect(
     () => () => {
+      cancelledRef.current = true;
       urlsRef.current.forEach((u) => URL.revokeObjectURL(u));
     },
     []
   );
+
+  /** Beri browser kesempatan menggambar & memproses input antar item batch
+   *  (rAF memastikan paint, fallback timeout untuk tab yang tidak terlihat). */
+  const yieldToUi = () =>
+    new Promise<void>((resolve) => {
+      const fallback = setTimeout(() => resolve(), 80);
+      requestAnimationFrame(() => {
+        clearTimeout(fallback);
+        setTimeout(resolve, 0);
+      });
+    });
 
   // Persist pengaturan proses & awalan label.
   useEffect(() => {
@@ -166,6 +190,7 @@ export default function UpscaleDenoisePage() {
   };
 
   const processOne = async (it: Item): Promise<void> => {
+    if (cancelledRef.current) return;
     setItems((prev) =>
       prev.map((x) => (x.id === it.id ? { ...x, status: "memproses" } : x))
     );
@@ -175,8 +200,9 @@ export default function UpscaleDenoisePage() {
       const blob = await canvasToBlob(out, outFormat, quality / 100);
       const url = URL.createObjectURL(blob);
       urlsRef.current.push(url);
-      // Perbandingan kualitas antar format (PNG/WebP/JPG) dari kanvas hasil.
-      const formats = await compareFormats(out, quality);
+      // Perbandingan format TIDAK dihitung di sini — mahal (3 encode + PSNR
+      // resolusi penuh) dan tidak selalu dibutuhkan. Kanvas hasil disimpan
+      // sementara di item; tabel "📊 Format" menghitungnya on-demand.
       setItems((prev) =>
         prev.map((x) =>
           x.id === it.id
@@ -188,7 +214,8 @@ export default function UpscaleDenoisePage() {
                 resultH: out.height,
                 usedScale: scale,
                 usedFormat: outFormat,
-                formats,
+                formats: undefined,
+                resultCanvas: out,
               }
             : x
         )
@@ -204,6 +231,39 @@ export default function UpscaleDenoisePage() {
     }
   };
 
+  /** Buka tabel perbandingan format (PNG/WebP/JPG) untuk satu item.
+   *  Dihitung on-demand dengan indikator loading, hasil di-cache di item
+   *  (buka ulang instan); kanvas hasil dibuang setelah dipakai. */
+  const toggleFormats = async (it: Item) => {
+    if (showFormats === it.id) {
+      setShowFormats(null);
+      return;
+    }
+    setShowFormats(it.id);
+    if (it.formats || formatLoading.has(it.id)) return; // cache / sedang dihitung
+    setFormatLoading((prev) => new Set(prev).add(it.id));
+    try {
+      const canvas =
+        it.resultCanvas ?? (await loadImageToCanvas(it.resultUrl!));
+      const formats = await compareFormats(canvas, quality);
+      setItems((prev) =>
+        prev.map((x) =>
+          x.id === it.id ? { ...x, formats, resultCanvas: null } : x
+        )
+      );
+    } catch (e) {
+      setShowFormats(null);
+      setError(e instanceof Error ? e.message : "Gagal membandingkan format.");
+    } finally {
+      setFormatLoading((prev) => {
+        if (!prev.has(it.id)) return prev;
+        const next = new Set(prev);
+        next.delete(it.id);
+        return next;
+      });
+    }
+  };
+
   const runAll = async () => {
     if (processing) return;
     const queue = items.filter((i) => i.status !== "selesai" && i.status !== "gagal");
@@ -212,12 +272,15 @@ export default function UpscaleDenoisePage() {
       return;
     }
     setError("");
+    cancelledRef.current = false;
     setProcessing(true);
     try {
       for (const it of queue) {
+        if (cancelledRef.current) break;
         await processOne(it);
-        // Beri kesempatan UI memperbarui progress antar item.
-        await new Promise((r) => setTimeout(r, 30));
+        // Yield antar item: badge progress & kontrol ter-update, browser
+        // tetap responsif di tengah batch (setelah item terakhir sekalipun).
+        await yieldToUi();
       }
     } finally {
       setProcessing(false);
@@ -465,12 +528,10 @@ export default function UpscaleDenoisePage() {
                           <button
                             type="button"
                             className="btn"
-                            onClick={() => {
-                              setShowFormats((cur) => (cur === it.id ? null : it.id));
-                            }}
-                            title="Bandingkan ukuran & PSNR PNG/WebP/JPG"
+                            onClick={() => toggleFormats(it)}
+                            title="Bandingkan ukuran & PSNR PNG/WebP/JPG (dihitung saat dibuka)"
                           >
-                            📊 Format
+                            {formatLoading.has(it.id) ? "⏳" : "📊"} Format
                           </button>
                           <button
                             type="button"
@@ -492,46 +553,56 @@ export default function UpscaleDenoisePage() {
                       </button>
                     </div>
                   </div>
-                  {showFormats === it.id && it.formats && (
+                  {showFormats === it.id && (
                     <div className="w2x-formats">
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Format</th>
-                            <th>Ukuran</th>
-                            <th>PSNR</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {it.formats.map((f) => (
-                            <tr
-                              key={f.format}
-                              className={
-                                f.format === it.usedFormat ? "w2x-fmt-used" : ""
-                              }
-                            >
-                              <td>
-                                {FMT_LABEL[f.format]}
-                                {f.format === it.usedFormat && " ✓"}
-                              </td>
-                              <td>{fmtSize(f.size)}</td>
-                              <td>
-                                {f.format === "png"
-                                  ? "lossless"
-                                  : f.psnrDb == null
-                                    ? "—"
-                                    : `${f.psnrDb.toFixed(1)} dB`}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                      <p className="hint">
-                        PSNR = perbandingan kualitas versi lossy terhadap kanvas
-                        asli (makin tinggi makin dekat). Format yang dipakai
-                        untuk unduhan ditandai ✓ — kualitas WebP/JPG mengikuti
-                        pengaturan ({quality}%).
-                      </p>
+                      {it.formats ? (
+                        <>
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>Format</th>
+                                <th>Ukuran</th>
+                                <th>PSNR</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {it.formats.map((f) => (
+                                <tr
+                                  key={f.format}
+                                  className={
+                                    f.format === it.usedFormat
+                                      ? "w2x-fmt-used"
+                                      : ""
+                                  }
+                                >
+                                  <td>
+                                    {FMT_LABEL[f.format]}
+                                    {f.format === it.usedFormat && " ✓"}
+                                  </td>
+                                  <td>{fmtSize(f.size)}</td>
+                                  <td>
+                                    {f.format === "png"
+                                      ? "lossless"
+                                      : f.psnrDb == null
+                                        ? "—"
+                                        : `${f.psnrDb.toFixed(1)} dB`}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          <p className="hint">
+                            PSNR = perbandingan kualitas versi lossy terhadap
+                            kanvas asli (makin tinggi makin dekat). Format yang
+                            dipakai untuk unduhan ditandai ✓ — kualitas WebP/JPG
+                            mengikuti pengaturan ({quality}%).
+                          </p>
+                        </>
+                      ) : (
+                        <p className="hint">
+                          ⏳ Menghitung ukuran &amp; PSNR PNG/WebP/JPG…
+                        </p>
+                      )}
                     </div>
                   )}
                 </li>
