@@ -1,6 +1,17 @@
+import { Suspense } from "react";
 import { Navigate, NavLink, Route, Routes } from "react-router-dom";
 import { LEAF_MODULES, MODULES } from "./modules/registry";
 import Home from "./pages/Home";
+
+/** Fallback singkat saat chunk modul sedang diunduh (lazy load). */
+function PageLoader() {
+  return (
+    <div className="page-loader">
+      <span className="spinner" aria-hidden="true" />
+      <p>Memuat modul…</p>
+    </div>
+  );
+}
 
 export default function App() {
   return (
@@ -46,16 +57,18 @@ export default function App() {
       </aside>
 
       <main className="content">
-        <Routes>
-          <Route path="/" element={<Home />} />
-          {MODULES.map((m) => (
-            <Route key={m.id} path={m.path} element={<m.Component />} />
-          ))}
-          {LEAF_MODULES.map((l) => (
-            <Route key={l.id} path={l.path} element={<l.Component />} />
-          ))}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            {MODULES.map((m) => (
+              <Route key={m.id} path={m.path} element={<m.Component />} />
+            ))}
+            {LEAF_MODULES.map((l) => (
+              <Route key={l.id} path={l.path} element={<l.Component />} />
+            ))}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </main>
     </div>
   );

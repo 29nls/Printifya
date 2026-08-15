@@ -24,17 +24,23 @@ export function fitsA4(
   );
 }
 
-/** Jumlah kolom maksimal yang muat di A4 dengan margin minimal. */
-export function maxCols(size: PasFotoSize): number {
+/**
+ * Jumlah kolom maksimal yang muat di A4 dengan margin tertentu
+ * (default: margin minimal).
+ */
+export function maxCols(size: PasFotoSize, marginCm: number = MIN_MARGIN_CM): number {
   let c = 1;
-  while (fitsA4(size, c + 1, 1, MIN_MARGIN_CM)) c += 1;
+  while (fitsA4(size, c + 1, 1, marginCm)) c += 1;
   return c;
 }
 
-/** Jumlah baris maksimal yang muat di A4 dengan margin minimal. */
-export function maxRows(size: PasFotoSize): number {
+/**
+ * Jumlah baris maksimal yang muat di A4 dengan margin tertentu
+ * (default: margin minimal).
+ */
+export function maxRows(size: PasFotoSize, marginCm: number = MIN_MARGIN_CM): number {
   let r = 1;
-  while (fitsA4(size, 1, r + 1, MIN_MARGIN_CM)) r += 1;
+  while (fitsA4(size, 1, r + 1, marginCm)) r += 1;
   return r;
 }
 
@@ -62,14 +68,15 @@ function toJpegOnWhite(dataUrl: string): Promise<string> {
 }
 
 /**
- * Buat PDF A4 berisi grid pas foto pada ukuran fisik presisi (mm),
+ * Bangun dokumen PDF A4 berisi grid pas foto pada ukuran fisik presisi (mm),
  * margin sesuai pengaturan, dan grid diratakan di tengah halaman.
  */
-export async function exportPasFotoPdf(
+async function buildSheetDoc(
   size: PasFotoSize,
   dataUrl: string,
-  { cols, rows, marginCm }: PdfSheetOptions
-): Promise<void> {
+  { cols, rows, marginCm }: PdfSheetOptions,
+  autoPrint: boolean
+): Promise<jsPDF> {
   if (!fitsA4(size, cols, rows, marginCm)) {
     throw new Error(
       `Grid ${cols}×${rows} tidak muat di A4 dengan margin ${marginCm} cm`
@@ -97,5 +104,34 @@ export async function exportPasFotoPdf(
     }
   }
 
+  if (autoPrint) doc.autoPrint();
+  return doc;
+}
+
+/** Ekspor PDF sebagai file yang diunduh. */
+export async function exportPasFotoPdf(
+  size: PasFotoSize,
+  dataUrl: string,
+  options: PdfSheetOptions
+): Promise<void> {
+  const doc = await buildSheetDoc(size, dataUrl, options, false);
   doc.save(`${size.fileName}-a4.pdf`);
+}
+
+/**
+ * Buka PDF template di tab baru dan memicu dialog cetak browser (autoPrint).
+ * Mengembalikan `false` jika pop-up diblokir.
+ */
+export async function printPasFotoPdf(
+  size: PasFotoSize,
+  dataUrl: string,
+  options: PdfSheetOptions
+): Promise<boolean> {
+  const doc = await buildSheetDoc(size, dataUrl, options, true);
+  const blob = doc.output("blob");
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, "_blank");
+  // Biarkan viewer sempat memuat PDF sebelum URL di-revoke.
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return win !== null;
 }

@@ -2,10 +2,27 @@ import { useEffect, useRef, useState } from "react";
 import type { PasFotoSize } from "./pasFotoSize";
 import CropperEditor from "./CropperEditor";
 import A4SheetPreview from "./A4SheetPreview";
-import { exportPasFotoPdf, fitsA4, maxCols, maxRows } from "./exportPdf";
+import {
+  exportPasFotoPdf,
+  fitsA4,
+  maxCols,
+  maxRows,
+  printPasFotoPdf,
+} from "./exportPdf";
 import "./style.css";
 
 type Step = "upload" | "edit" | "result";
+
+interface PasFotoWorkflowProps {
+  /** Ukuran pas foto aktif (awal). Wajib diisi; bila `presets` ada, diinisialisasi dari preset pertama. */
+  size: PasFotoSize;
+  /** Daftar preset ukuran (mode visa). Saat ada, tampil pemilih preset di atas halaman. */
+  presets?: PasFotoSize[];
+  /** Header modul. Default: diambil dari ukuran aktif. */
+  header?: { title: string; description: string; icon: string };
+  /** Sembunyikan header (dipakai modul yang merender header sendiri, mis. Custom Size). */
+  showHeader?: boolean;
+}
 
 const clampInt = (raw: string, min: number, max: number) => {
   const n = Number(raw);
@@ -20,9 +37,18 @@ const clampNum = (raw: string, min: number, max: number) => {
 };
 
 /** Alur lengkap pas foto: upload → crop → hasil + template cetak A4 + ekspor PDF. */
-export default function PasFotoWorkflow({ size }: { size: PasFotoSize }) {
-  const maxC = maxCols(size);
-  const maxR = maxRows(size);
+export default function PasFotoWorkflow({
+  size,
+  presets,
+  header,
+  showHeader = true,
+}: PasFotoWorkflowProps) {
+  const DEFAULT_MARGIN_CM = 0.5;
+
+  const [activeSize, setActiveSize] = useState<PasFotoSize>(size);
+  // Batas input (maks di margin minimal) vs default grid (maks di margin default).
+  const maxC = maxCols(activeSize);
+  const maxR = maxRows(activeSize);
 
   const [step, setStep] = useState<Step>("upload");
   const [originalUrl, setOriginalUrl] = useState<string | null>(null);
@@ -30,13 +56,33 @@ export default function PasFotoWorkflow({ size }: { size: PasFotoSize }) {
   const [fileName, setFileName] = useState("");
   const [error, setError] = useState("");
   const [dragOver, setDragOver] = useState(false);
-  const [cols, setCols] = useState(maxC);
-  const [rows, setRows] = useState(maxR);
-  const [marginCm, setMarginCm] = useState(0.5);
+  const [cols, setCols] = useState(maxCols(activeSize, DEFAULT_MARGIN_CM));
+  const [rows, setRows] = useState(maxRows(activeSize, DEFAULT_MARGIN_CM));
+  const [marginCm, setMarginCm] = useState(DEFAULT_MARGIN_CM);
   const [exporting, setExporting] = useState(false);
+  const [printing, setPrinting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const canExport = fitsA4(size, cols, rows, marginCm);
+  const canExport = fitsA4(activeSize, cols, rows, marginCm);
+  const headerInfo =
+    header ?? {
+      title: activeSize.title,
+      description: activeSize.description,
+      icon: activeSize.icon,
+    };
+
+  // Sinkronkan ukuran aktif bila prop `size` berubah (mode ukuran kustom).
+  // Foto yang sudah dicrop tidak valid lagi, jadi ulangi crop foto asli.
+  useEffect(() => {
+    if (size.id === activeSize.id) return;
+    setActiveSize(size);
+    setCroppedUrl(null);
+    setCols(maxCols(size, DEFAULT_MARGIN_CM));
+    setRows(maxRows(size, DEFAULT_MARGIN_CM));
+    setError("");
+    setStep(originalUrl ? "edit" : "upload");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [size]);
 
   // Bersihkan object URL lama saat diganti / komponen dilepas.
   useEffect(() => {
@@ -66,19 +112,31 @@ export default function PasFotoWorkflow({ size }: { size: PasFotoSize }) {
     handleFile(e.dataTransfer.files?.[0]);
   };
 
+  /** Ganti preset ukuran: hasil crop lama tidak valid lagi, jadi ulangi crop foto asli. */
+  const selectSize = (s: PasFotoSize) => {
+    if (s.id === activeSize.id) return;
+    setActiveSize(s);
+    setCroppedUrl(null);
+    setCols(maxCols(s, DEFAULT_MARGIN_CM));
+    setRows(maxRows(s, DEFAULT_MARGIN_CM));
+    setError("");
+    setStep(originalUrl ? "edit" : "upload");
+  };
+
   const download = () => {
     if (!croppedUrl) return;
     const a = document.createElement("a");
     a.href = croppedUrl;
-    a.download = `${size.fileName}.png`;
+    a.download = `${activeSize.fileName}.png`;
     a.click();
   };
 
   const handleExportPdf = async () => {
     if (!croppedUrl || !canExport || exporting) return;
+    setError("");
     setExporting(true);
     try {
-      await exportPasFotoPdf(size, croppedUrl, { cols, rows, marginCm });
+      await exportPasFotoPdf(activeSize, croppedUrl, { cols, rows, marginCm });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Gagal membuat PDF.");
     } finally {
@@ -86,15 +144,58 @@ export default function PasFotoWorkflow({ size }: { size: PasFotoSize }) {
     }
   };
 
+  const handlePrint = async () => {
+    if (!croppedUrl || !canExport || printing) return;
+    setError("");
+    setPrinting(true);
+    try {
+      const allowed = await printPasFotoPdf(activeSize, croppedUrl, {
+        cols,
+        rows,
+        marginCm,
+      });
+      if (!allowed) {
+        setError(
+          "Popup diblokir browser. Izinkan pop-up untuk membuka dialog cetak."
+        );
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Gagal menyiapkan cetak.");
+    } finally {
+      setPrinting(false);
+    }
+  };
+
   return (
     <div className="pas-foto-page">
-      <header className="module-header">
-        <span className="module-icon">{size.icon}</span>
-        <div>
-          <h1>{size.title}</h1>
-          <p>{size.description}</p>
+      {showHeader && (
+        <header className="module-header">
+          <span className="module-icon">{headerInfo.icon}</span>
+          <div>
+            <h1>{headerInfo.title}</h1>
+            <p>{headerInfo.description}</p>
+          </div>
+        </header>
+      )}
+
+      {presets && presets.length > 0 && (
+        <div className="preset-picker">
+          <span className="preset-label">Pilih negara / jenis visa</span>
+          <div className="preset-chips">
+            {presets.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className={p.id === activeSize.id ? "chip active" : "chip"}
+                onClick={() => selectSize(p)}
+              >
+                {p.title}
+              </button>
+            ))}
+          </div>
+          {activeSize.note && <p className="preset-note">ℹ️ {activeSize.note}</p>}
         </div>
-      </header>
+      )}
 
       {step === "upload" && (
         <section className="panel upload-section">
@@ -134,9 +235,10 @@ export default function PasFotoWorkflow({ size }: { size: PasFotoSize }) {
           <p className="hint">
             💡 Hasil akhir:{" "}
             <strong>
-              {size.widthPx} × {size.heightPx} px @ 300 DPI
+              {activeSize.widthPx} × {activeSize.heightPx} px @{" "}
+              {activeSize.dpi ?? 300} DPI
             </strong>{" "}
-            — ukuran cetak {size.label}, siap cetak di printer biasa.
+            — ukuran cetak {activeSize.label}, siap cetak di printer biasa.
           </p>
         </section>
       )}
@@ -144,7 +246,7 @@ export default function PasFotoWorkflow({ size }: { size: PasFotoSize }) {
       {step === "edit" && originalUrl && (
         <CropperEditor
           key={originalUrl}
-          size={size}
+          size={activeSize}
           src={originalUrl}
           fileName={fileName}
           onCancel={() => setStep("upload")}
@@ -162,33 +264,37 @@ export default function PasFotoWorkflow({ size }: { size: PasFotoSize }) {
               <div className="print-frame">
                 <img
                   src={croppedUrl}
-                  alt={`Hasil ${size.title}`}
+                  alt={`Hasil ${activeSize.title}`}
                   className="print-size"
                   style={{
-                    width: `${size.widthMm / 10}cm`,
-                    height: `${size.heightMm / 10}cm`,
+                    width: `${activeSize.widthMm / 10}cm`,
+                    height: `${activeSize.heightMm / 10}cm`,
                   }}
                 />
               </div>
-              <p className="caption">Ukuran cetak sebenarnya ({size.label})</p>
+              <p className="caption">Ukuran cetak sebenarnya ({activeSize.label})</p>
             </div>
 
             <div className="result-info">
               <h2>Hasil Pas Foto</h2>
               <ul className="info-list">
                 <li>
+                  <span>Jenis</span>
+                  <strong>{activeSize.title}</strong>
+                </li>
+                <li>
                   <span>Ukuran cetak</span>
-                  <strong>{size.label}</strong>
+                  <strong>{activeSize.label}</strong>
                 </li>
                 <li>
                   <span>Resolusi</span>
                   <strong>
-                    {size.widthPx} × {size.heightPx} px
+                    {activeSize.widthPx} × {activeSize.heightPx} px
                   </strong>
                 </li>
                 <li>
                   <span>DPI</span>
-                  <strong>300</strong>
+                  <strong>{activeSize.dpi ?? 300}</strong>
                 </li>
                 <li>
                   <span>Format</span>
@@ -248,12 +354,22 @@ export default function PasFotoWorkflow({ size }: { size: PasFotoSize }) {
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={!canExport || exporting}
+                disabled={!canExport || exporting || printing}
+                onClick={handlePrint}
+              >
+                {printing ? "Menyiapkan PDF…" : "🖨️ Cetak"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={!canExport || exporting || printing}
                 onClick={handleExportPdf}
               >
                 {exporting ? "Menyiapkan PDF…" : "⬇️ Ekspor PDF A4"}
               </button>
             </div>
+
+            {error && <p className="error">{error}</p>}
 
             {!canExport && (
               <p className="error">
@@ -263,7 +379,7 @@ export default function PasFotoWorkflow({ size }: { size: PasFotoSize }) {
             )}
 
             <A4SheetPreview
-              size={size}
+              size={activeSize}
               src={croppedUrl}
               cols={cols}
               rows={rows}

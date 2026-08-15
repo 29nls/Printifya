@@ -16,6 +16,10 @@ export interface PasFotoSize {
   /** Dimensi cetak fisik dalam mm. */
   widthMm: number;
   heightMm: number;
+  /** DPI output. Default: 300. */
+  dpi?: number;
   /** Nama dasar file hasil (PNG & PDF). */
   fileName: string;
+  /** Catatan aturan (mis. latar belakang & ukuran kepala untuk visa). Opsional. */
+  note?: string;
 }

@@ -1,35 +1,38 @@
-import type { ComponentType } from "react";
+import { lazy, type ComponentType } from "react";
+
+// Semua halaman modul dimuat secara lazy (code-splitting) agar library berat
+// seperti cropperjs & jspdf hanya diunduh saat modul terkait dibuka.
 
 // Grup modul
-import PhotoStudioPage from "./photo-studio";
-import DocumentStudioPage from "./document-studio";
-import PrintCenterPage from "./print-center";
-import AiAssistantPage from "./ai-assistant";
+const PhotoStudioPage = lazy(() => import("./photo-studio"));
+const DocumentStudioPage = lazy(() => import("./document-studio"));
+const PrintCenterPage = lazy(() => import("./print-center"));
+const AiAssistantPage = lazy(() => import("./ai-assistant"));
 
 // Photo Studio
-import PasFoto2x3Page from "./photo-studio/pas-foto-2x3";
-import PasFoto3x4Page from "./photo-studio/pas-foto-3x4";
-import PasFoto4x6Page from "./photo-studio/pas-foto-4x6";
-import VisaPhotoPage from "./photo-studio/visa-photo";
-import CustomSizePage from "./photo-studio/custom-size";
+const PasFoto2x3Page = lazy(() => import("./photo-studio/pas-foto-2x3"));
+const PasFoto3x4Page = lazy(() => import("./photo-studio/pas-foto-3x4"));
+const PasFoto4x6Page = lazy(() => import("./photo-studio/pas-foto-4x6"));
+const VisaPhotoPage = lazy(() => import("./photo-studio/visa-photo"));
+const CustomSizePage = lazy(() => import("./photo-studio/custom-size"));
 
 // Document Studio
-import WordEditorPage from "./document-studio/word-editor";
-import ExcelSheetPage from "./document-studio/excel-sheet";
-import PdfEditorPage from "./document-studio/pdf-editor";
-import TemplateSuratPage from "./document-studio/template-surat";
+const WordEditorPage = lazy(() => import("./document-studio/word-editor"));
+const ExcelSheetPage = lazy(() => import("./document-studio/excel-sheet"));
+const PdfEditorPage = lazy(() => import("./document-studio/pdf-editor"));
+const TemplateSuratPage = lazy(() => import("./document-studio/template-surat"));
 
 // Print Center
-import PrinterLokalPage from "./print-center/printer-lokal";
-import QzTrayPage from "./print-center/qz-tray";
-import NetworkPrinterPage from "./print-center/network-printer";
-import PdfExportPage from "./print-center/pdf-export";
+const PrinterLokalPage = lazy(() => import("./print-center/printer-lokal"));
+const QzTrayPage = lazy(() => import("./print-center/qz-tray"));
+const NetworkPrinterPage = lazy(() => import("./print-center/network-printer"));
+const PdfExportPage = lazy(() => import("./print-center/pdf-export"));
 
 // AI Assistant
-import AutoCropFacePage from "./ai-assistant/auto-crop-face";
-import BackgroundRemovalPage from "./ai-assistant/background-removal";
-import EnhancePhotoPage from "./ai-assistant/enhance-photo";
-import AutoLayoutPage from "./ai-assistant/auto-layout";
+const AutoCropFacePage = lazy(() => import("./ai-assistant/auto-crop-face"));
+const BackgroundRemovalPage = lazy(() => import("./ai-assistant/background-removal"));
+const EnhancePhotoPage = lazy(() => import("./ai-assistant/enhance-photo"));
+const AutoLayoutPage = lazy(() => import("./ai-assistant/auto-layout"));
 
 export interface Module {
   id: string;

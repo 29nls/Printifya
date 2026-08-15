@@ -1,7 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Cropper from "cropperjs";
 import "cropperjs/dist/cropper.css";
 import type { PasFotoSize } from "./pasFotoSize";
+import { detectFace } from "./faceDetect";
 
 interface CropperEditorProps {
   size: PasFotoSize;
@@ -24,6 +25,7 @@ export default function CropperEditor({
 }: CropperEditorProps) {
   const imgRef = useRef<HTMLImageElement>(null);
   const cropperRef = useRef<Cropper | null>(null);
+  const [faceStatus, setFaceStatus] = useState<"idle" | "found" | "none">("idle");
 
   useEffect(() => {
     const img = imgRef.current;
@@ -41,6 +43,7 @@ export default function CropperEditor({
         center: true,
         checkOrientation: true,
         modal: true,
+        ready: runFaceDetection,
       });
       cropperRef.current = cropper;
     };
@@ -53,7 +56,45 @@ export default function CropperEditor({
       cropperRef.current?.destroy();
       cropperRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src, size]);
+
+  /**
+   * Deteksi wajah lalu arahkan kotak crop ke wajah dengan framing pas foto
+   * (wajah ±60% tinggi foto, mata di ±40% dari atas).
+   */
+  const runFaceDetection = () => {
+    const cropper = cropperRef.current;
+    const img = imgRef.current;
+    if (!cropper || !img) return;
+
+    const face = detectFace(img);
+    if (!face) {
+      setFaceStatus("none");
+      return;
+    }
+    setFaceStatus("found");
+
+    const aspect = size.widthPx / size.heightPx;
+
+    // Perkiraan tinggi kepala = kulit terdeteksi + ruang rambut di atasnya (±20%).
+    const headH = face.h * 1.2;
+    const cropHNorm = headH / 0.6; // kepala ≈ 60% tinggi foto
+    const faceCX = face.x + face.w / 2;
+    const faceCY = face.y + face.h * 0.35; // area mata di sepertiga atas kulit
+
+    // Koordinat crop box berada dalam ruang piksel natural gambar (container
+    // cropper hanya diskalakan via CSS transform), jadi pakai naturalWidth/Height.
+    const height = cropHNorm * img.naturalHeight;
+    const width = height * aspect;
+
+    cropper.setData({
+      x: Math.max(0, faceCX * img.naturalWidth - width / 2),
+      y: Math.max(0, faceCY * img.naturalHeight - 0.4 * height),
+      width,
+      height,
+    });
+  };
 
   const apply = () => {
     const cropper = cropperRef.current;
@@ -78,6 +119,9 @@ export default function CropperEditor({
       </div>
 
       <div className="cropper-toolbar">
+        <button type="button" className="btn" onClick={runFaceDetection}>
+          🎯 Deteksi Wajah
+        </button>
         <button type="button" className="btn" onClick={run((c) => c.zoom(0.1))}>
           🔍 Perbesar
         </button>
@@ -94,6 +138,12 @@ export default function CropperEditor({
           ↺ Reset
         </button>
         <span className="ratio-badge">Rasio terkunci {size.label}</span>
+        {faceStatus === "found" && (
+          <span className="face-badge found">🎯 Wajah terdeteksi</span>
+        )}
+        {faceStatus === "none" && (
+          <span className="face-badge">Wajah tidak terdeteksi</span>
+        )}
       </div>
 
       <div className="cropper-actions">
@@ -108,7 +158,7 @@ export default function CropperEditor({
       <p className="hint">
         Geser atau seret kotak crop untuk memilih area wajah. Hasil akhir:{" "}
         <strong>
-          {size.widthPx} × {size.heightPx} px @ 300 DPI
+          {size.widthPx} × {size.heightPx} px @ {size.dpi ?? 300} DPI
         </strong>{" "}
         ({size.label}).
       </p>
