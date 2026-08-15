@@ -207,7 +207,8 @@ export function canvasLikeToBlob(
 export interface FormatStat {
   format: OutFormat;
   size: number;
-  /** PSNR terhadap kanvas asli (dB); null = lossless (PNG) atau gagal decode. */
+  /** PSNR terhadap kanvas asli (dB); Infinity = rekonstruksi identik
+   *  (mse 0, lossless); null = gagal decode. */
   psnrDb: number | null;
 }
 
@@ -249,7 +250,7 @@ export async function compareFormats(
       out.push({
         format: fmt,
         size: blob.size,
-        psnrDb: mse === 0 ? null : 10 * Math.log10((255 * 255) / mse),
+        psnrDb: mse === 0 ? Infinity : 10 * Math.log10((255 * 255) / mse),
       });
     } catch {
       out.push({ format: fmt, size: 0, psnrDb: null });

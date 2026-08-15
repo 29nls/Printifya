@@ -111,8 +111,9 @@ describe("compareFormats", () => {
     expect(out[0].size).toBe(new Blob(["png:0.92"]).size);
     expect(out[1].size).toBe(new Blob(["webp:0.92"]).size);
     expect(out[2].size).toBe(new Blob(["jpg:0.92"]).size);
-    // PNG lossless → PSNR null (mse 0); WebP/JPG lossy → PSNR terukur.
-    expect(out[0].psnrDb).toBeNull();
+    // PNG lossless (decode = sumber, mse 0) → PSNR tak terhingga (∞ dB);
+    // WebP/JPG lossy → PSNR terukur.
+    expect(out[0].psnrDb).toBe(Infinity);
     expect(out[1].psnrDb).toBeCloseTo(psnr(SRC, DEC_WEBP)!, 2);
     expect(out[2].psnrDb).toBeCloseTo(psnr(SRC, DEC_JPG)!, 2);
   });
@@ -169,7 +170,10 @@ describe("compareFormats", () => {
     const out = await compareFormats(h.sourceCanvas, 90);
 
     expect(out).toHaveLength(3);
+    // Gagal decode → null (bukan Infinity): render tabel tetap "—",
+    // sedangkan rekonstruksi identik (mse 0) → Infinity ("∞ dB").
     expect(out[1]).toEqual({ format: "webp", size: 0, psnrDb: null });
+    expect(out[0].psnrDb).toBe(Infinity); // png tetap dihitung, lossless
     // PNG & JPG tetap dihitung walau webp gagal.
     expect(out[0].size).toBeGreaterThan(0);
     expect(out[2].size).toBeGreaterThan(0);

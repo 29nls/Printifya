@@ -669,7 +669,9 @@ export default function UpscaleDenoisePage() {
                                       ? "lossless"
                                       : f.psnrDb == null
                                         ? "—"
-                                        : `${f.psnrDb.toFixed(1)} dB`}
+                                        : Number.isFinite(f.psnrDb)
+                                          ? `${f.psnrDb.toFixed(1)} dB`
+                                          : "∞ dB"}
                                   </td>
                                 </tr>
                               ))}

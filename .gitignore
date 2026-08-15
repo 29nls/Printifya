@@ -5,3 +5,5 @@ dist
 npm-debug.log*
 .freebuff/desktop-v2.db
 .freebuff/desktop-v2.db-wal
+.freebuff/desktop-v2.db-wal
+/.freebuff
