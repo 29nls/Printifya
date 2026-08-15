@@ -51,7 +51,7 @@ function rgbToHsv(r: number, g: number, b: number): [number, number, number] {
 }
 
 /** Klasifikasi warna kulit: gabungan rentang HSV dan YCrCb yang cukup longgar. */
-function isSkinLike(r: number, g: number, b: number): boolean {
+export function isSkinLike(r: number, g: number, b: number): boolean {
   const [h, s, v] = rgbToHsv(r, g, b);
   // YCrCb (Rec.601) tanpa komponen Y.
   const cr = 0.5 * r - 0.419 * g - 0.081 * b + 128;
