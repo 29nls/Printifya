@@ -335,6 +335,11 @@
   display: block;
 }
 
+/* Sel kosong (halaman terakhir Auto Layout bila foto habis). */
+.sheet-photo-empty {
+  background: #f1f3f7;
+}
+
 .sheet-caption {
   margin: 0;
   color: var(--text-muted);

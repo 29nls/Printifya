@@ -70,10 +70,14 @@ function toJpegOnWhite(dataUrl: string): Promise<string> {
 /**
  * Bangun dokumen PDF A4 berisi grid pas foto pada ukuran fisik presisi (mm),
  * margin sesuai pengaturan, dan grid diratakan di tengah halaman.
+ *
+ * `dataUrls` bisa berupa satu gambar (diulang di semua sel — pola pas foto)
+ * atau daftar gambar yang diisi sel per sel; bila lebih banyak dari jumlah
+ * sel, dibuat halaman tambahan secara otomatis (Auto Layout).
  */
 async function buildSheetDoc(
   size: PasFotoSize,
-  dataUrl: string,
+  dataUrls: string | string[],
   { cols, rows, marginCm }: PdfSheetOptions,
   autoPrint: boolean
 ): Promise<jsPDF> {
@@ -83,7 +87,8 @@ async function buildSheetDoc(
     );
   }
 
-  const jpeg = await toJpegOnWhite(dataUrl);
+  const urls = Array.isArray(dataUrls) ? dataUrls : [dataUrls];
+  const jpegs = await Promise.all(urls.map(toJpegOnWhite));
   const doc = new jsPDF({ unit: "mm", format: "a4" });
 
   const gridW = size.widthMm * cols;
@@ -91,13 +96,19 @@ async function buildSheetDoc(
   const marginX = Math.max(marginCm * 10, (PAGE_W_MM - gridW) / 2);
   const marginY = Math.max(marginCm * 10, (PAGE_H_MM - gridH) / 2);
 
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
+  const count = cols * rows;
+  const pages = Math.max(1, Math.ceil(jpegs.length / count));
+
+  for (let page = 0; page < pages; page++) {
+    if (page > 0) doc.addPage();
+    for (let i = 0; i < count; i++) {
+      const idx = page * count + i;
+      if (idx >= jpegs.length) break; // halaman terakhir boleh tidak penuh
       doc.addImage(
-        jpeg,
+        jpegs[idx],
         "JPEG",
-        marginX + c * size.widthMm,
-        marginY + r * size.heightMm,
+        marginX + (i % cols) * size.widthMm,
+        marginY + Math.floor(i / cols) * size.heightMm,
         size.widthMm,
         size.heightMm
       );
@@ -116,6 +127,16 @@ export async function exportPasFotoPdf(
 ): Promise<void> {
   const doc = await buildSheetDoc(size, dataUrl, options, false);
   doc.save(`${size.fileName}-a4.pdf`);
+}
+
+/** Ekspor PDF layout: banyak foto disusun sel per sel, multi-halaman bila perlu. */
+export async function exportLayoutPdf(
+  size: PasFotoSize,
+  srcs: string[],
+  options: PdfSheetOptions
+): Promise<void> {
+  const doc = await buildSheetDoc(size, srcs, options, false);
+  doc.save(`${size.fileName}-layout-a4.pdf`);
 }
 
 /**

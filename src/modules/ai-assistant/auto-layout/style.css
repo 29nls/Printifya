@@ -1,0 +1,79 @@
+/* ---------- Strip foto yang diupload ---------- */
+
+.photo-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.photo-strip img {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.photo-item {
+  position: relative;
+  line-height: 0;
+}
+
+.photo-forward {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid var(--surface);
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  transition: background 0.15s;
+}
+
+.photo-forward:hover {
+  background: #4338ca;
+}
+
+.file-row-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ---------- Kepala pratinjau + navigasi halaman ---------- */
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.sheet-head h2 {
+  margin: 0;
+}
+
+.page-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.page-nav .btn {
+  padding: 6px 12px;
+}

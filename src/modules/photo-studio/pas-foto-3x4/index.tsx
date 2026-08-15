@@ -1,5 +1,10 @@
+import { useEffect, useState } from "react";
 import PasFotoWorkflow from "../shared/PasFotoWorkflow";
 import type { PasFotoSize } from "../shared/pasFotoSize";
+import {
+  clearPendingPasFoto,
+  peekPendingPasFoto,
+} from "../../shared/pasFotoBridge";
 
 const SIZE: PasFotoSize = {
   id: "3x4",
@@ -15,5 +20,14 @@ const SIZE: PasFotoSize = {
 };
 
 export default function PasFoto3x4Page() {
-  return <PasFotoWorkflow size={SIZE} />;
+  // Bila datang dari modul lain (mis. Background Removal), langsung lanjut
+  // ke langkah crop dengan gambar tersebut. peek (bukan take) agar aman
+  // terhadap double-mount React StrictMode; dihapus setelah commit di bawah.
+  const [initialImage] = useState(() => peekPendingPasFoto());
+
+  useEffect(() => {
+    clearPendingPasFoto();
+  }, []);
+
+  return <PasFotoWorkflow size={SIZE} initialImage={initialImage ?? undefined} />;
 }

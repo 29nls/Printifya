@@ -12,9 +12,13 @@ const PAGE_H_MM = 297; // A4
 /**
  * Bangun dokumen HTML mandiri berisi grid pas foto A4 dengan ukuran fisik
  * presisi (mm) — alternatif cetak tanpa jsPDF.
+ *
+ * `src` bisa berupa satu gambar (diulang di semua sel — pola pas foto) atau
+ * daftar gambar yang diisi sel per sel; bila lebih banyak dari jumlah sel,
+ * dibuat halaman tambahan secara otomatis (Auto Layout).
  */
 export function buildHtmlSheet(
-  src: string,
+  src: string | string[],
   size: PasFotoSize,
   { cols, rows, marginCm }: HtmlSheetOptions
 ): string {
@@ -23,10 +27,25 @@ export function buildHtmlSheet(
   const marginX = Math.max(marginCm * 10, (PAGE_W_MM - gridW) / 2);
   const marginY = Math.max(marginCm * 10, (PAGE_H_MM - gridH) / 2);
   const count = cols * rows;
-  const photos = Array.from(
-    { length: count },
-    () => `<img src="${src}" alt="" />`
-  ).join("\n");
+
+  const srcs = Array.isArray(src)
+    ? src
+    : Array.from({ length: count }, () => src);
+  const pages = Math.max(1, Math.ceil(srcs.length / count));
+
+  const pageDivs: string[] = [];
+  for (let p = 0; p < pages; p++) {
+    const cells: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const idx = p * count + i;
+      cells.push(
+        idx < srcs.length
+          ? `<img src="${srcs[idx]}" alt="" />`
+          : `<div class="empty"></div>`
+      );
+    }
+    pageDivs.push(`<div class="page"><div class="sheet">\n${cells.join("\n")}\n</div></div>`);
+  }
 
   return `<!doctype html>
 <html lang="id">
@@ -36,7 +55,15 @@ export function buildHtmlSheet(
 <style>
   @page { size: A4 portrait; margin: 0; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { width: 210mm; height: 297mm; }
+  html, body { width: 210mm; }
+  .page {
+    position: relative;
+    width: ${PAGE_W_MM}mm;
+    height: ${PAGE_H_MM}mm;
+    page-break-after: always;
+    break-after: page;
+  }
+  .page:last-child { page-break-after: auto; }
   .sheet {
     position: absolute;
     left: ${marginX}mm;
@@ -54,12 +81,11 @@ export function buildHtmlSheet(
     object-fit: cover;
     display: block;
   }
+  .sheet .empty { background: #ffffff; }
 </style>
 </head>
 <body>
-<div class="sheet">
-${photos}
-</div>
+${pageDivs.join("\n")}
 </body>
 </html>`;
 }

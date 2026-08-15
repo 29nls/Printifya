@@ -1,18 +1,278 @@
-import { ModulePage } from "../../../components/ModulePage";
+import { useEffect, useRef, useState } from "react";
+import {
+  computeAutoParams,
+  enhanceImage,
+  NEUTRAL_PARAMS,
+  type EnhanceParams,
+} from "./enhance";
+import "../../photo-studio/shared/style.css";
+import "./style.css";
+
+const PREVIEW_MAX = 1200; // px — sisi terpanjang pratinjau live
+
+const SLIDERS: {
+  key: keyof EnhanceParams;
+  label: string;
+  min: number;
+  max: number;
+  unit: string;
+}[] = [
+  { key: "brightness", label: "Kecerahan", min: -100, max: 100, unit: "" },
+  { key: "contrast", label: "Kontras", min: -100, max: 100, unit: "" },
+  { key: "sharpness", label: "Ketajaman", min: 0, max: 100, unit: "" },
+];
 
 export default function EnhancePhotoPage() {
+  const [originalUrl, setOriginalUrl] = useState<string | null>(null);
+  const [img, setImg] = useState<HTMLImageElement | null>(null);
+  const [fileName, setFileName] = useState("");
+  const [error, setError] = useState("");
+  const [dragOver, setDragOver] = useState(false);
+  const [params, setParams] = useState<EnhanceParams>(NEUTRAL_PARAMS);
+  const [preview, setPreview] = useState<HTMLCanvasElement | null>(null);
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+  const [autoApplied, setAutoApplied] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Pratinjau live dengan debounce singkat saat slider digeser.
+  useEffect(() => {
+    if (!img) return;
+    const t = setTimeout(() => {
+      try {
+        setPreview(enhanceImage(img, params, PREVIEW_MAX));
+      } catch {
+        // gambar rusak — biarkan pratinjau lama
+      }
+    }, 40);
+    return () => clearTimeout(t);
+  }, [img, params]);
+
+  useEffect(() => {
+    return () => {
+      if (originalUrl) URL.revokeObjectURL(originalUrl);
+    };
+  }, [originalUrl]);
+
+  const handleFile = (file?: File | null) => {
+    setError("");
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setError("File harus berupa gambar (JPG, PNG, atau WebP).");
+      return;
+    }
+    setFileName(file.name);
+    const url = URL.createObjectURL(file);
+
+    const image = new Image();
+    image.onload = () => {
+      setImg(image);
+      setDims({ w: image.naturalWidth, h: image.naturalHeight });
+      setParams(NEUTRAL_PARAMS);
+      setAutoApplied(false);
+      setOriginalUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return url;
+      });
+    };
+    image.onerror = () => {
+      setError("Gagal membaca gambar.");
+      URL.revokeObjectURL(url);
+    };
+    image.src = url;
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    handleFile(e.dataTransfer.files?.[0]);
+  };
+
+  /** Analisis histogram lalu set slider ke nilai yang disarankan. */
+  const autoEnhance = () => {
+    if (!img) return;
+    setParams(computeAutoParams(img));
+    setAutoApplied(true);
+  };
+
+  const reset = () => {
+    setParams(NEUTRAL_PARAMS);
+    setAutoApplied(false);
+  };
+
+  const download = () => {
+    if (!img) return;
+    const full = enhanceImage(img, params);
+    const a = document.createElement("a");
+    a.href = full.toDataURL("image/png");
+    a.download = "enhanced-photo.png";
+    a.click();
+  };
+
   return (
-    <ModulePage
-      icon="✨"
-      title="Enhance Photo"
-      description="Perbaiki kualitas foto secara otomatis: kecerahan, kontras, ketajaman, dan pencahayaan."
-      features={[
-        "Auto enhance: pencahayaan & kontras",
-        "Sharpen / pertegas detail wajah",
-        "Reduksi noise pada foto gelap",
-        "Penyesuaian warna kulit natural",
-        "Bandingkan hasil sebelum / sesudah",
-      ]}
-    />
+    <div className="enhance-page">
+      <header className="module-header">
+        <span className="module-icon">✨</span>
+        <div>
+          <h1>Enhance Photo</h1>
+          <p>
+            Perbaiki pencahayaan, kontras, dan ketajaman otomatis berbasis
+            histogram — atau atur manual dengan slider, dan bandingkan
+            sebelum/sesudah.
+          </p>
+        </div>
+      </header>
+
+      {!img && (
+        <section className="panel">
+          <div
+            className={dragOver ? "upload-zone dragging" : "upload-zone"}
+            role="button"
+            tabIndex={0}
+            onClick={() => inputRef.current?.click()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") inputRef.current?.click();
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={handleDrop}
+          >
+            <div className="upload-icon">📤</div>
+            <h3>Seret & letakkan foto di sini</h3>
+            <p>atau klik untuk memilih file — JPG, PNG, atau WebP</p>
+          </div>
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(e) => {
+              handleFile(e.target.files?.[0]);
+              e.target.value = "";
+            }}
+          />
+          {error && <p className="error">{error}</p>}
+          <p className="hint">
+            💡 Klik <strong>Auto Perbaiki</strong> untuk koreksi otomatis:
+            histogram luminance dibentangkan (persentil 1%–99%) ke rentang
+            penuh dan titik tengah digeser ke abu-abu 128, lalu disesuaikan
+            manual bila perlu. Semua proses berjalan lokal di browser.
+          </p>
+        </section>
+      )}
+
+      {img && originalUrl && (
+        <>
+          <section className="panel">
+            <div className="file-row">
+              <span>
+                🖼️ Foto: <strong>{fileName}</strong>
+                {dims && (
+                  <span className="dims">
+                    {" "}
+                    — {dims.w} × {dims.h} px
+                  </span>
+                )}
+              </span>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setImg(null);
+                  setPreview(null);
+                  setOriginalUrl((prev) => {
+                    if (prev) URL.revokeObjectURL(prev);
+                    return null;
+                  });
+                  setParams(NEUTRAL_PARAMS);
+                  setAutoApplied(false);
+                }}
+              >
+                🔄 Foto Lain
+              </button>
+            </div>
+
+            <div className="enhance-controls">
+              <div className="enhance-actions">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={autoEnhance}
+                >
+                  ✨ Auto Perbaiki
+                </button>
+                <button type="button" className="btn" onClick={reset}>
+                  ↺ Reset
+                </button>
+              </div>
+
+              <div className="sliders">
+                {SLIDERS.map((s) => (
+                  <label key={s.key} className="slider-row">
+                    <span className="slider-label">{s.label}</span>
+                    <input
+                      type="range"
+                      min={s.min}
+                      max={s.max}
+                      value={params[s.key]}
+                      onChange={(e) =>
+                        setParams((p) => ({
+                          ...p,
+                          [s.key]: Number(e.target.value),
+                        }))
+                      }
+                    />
+                    <span className="slider-value">
+                      {params[s.key] > 0 ? "+" : ""}
+                      {params[s.key]}
+                      {s.unit}
+                    </span>
+                  </label>
+                ))}
+              </div>
+
+              {autoApplied && (
+                <p className="auto-note">
+                  ✨ Auto diterapkan — geser slider untuk penyesuaian halus.
+                </p>
+              )}
+            </div>
+          </section>
+
+          <section className="panel">
+            <div className="bg-compare">
+              <figure>
+                <figcaption>Sebelum (asli)</figcaption>
+                <img src={originalUrl} alt="Foto asli" className="bg-preview-img" />
+              </figure>
+              <figure>
+                <figcaption>Sesudah (enhance)</figcaption>
+                {preview && (
+                  <canvas
+                    className="bg-preview-img"
+                    width={preview.width}
+                    height={preview.height}
+                    ref={(el) => {
+                      if (el) {
+                        const ctx = el.getContext("2d");
+                        ctx?.drawImage(preview, 0, 0);
+                      }
+                    }}
+                  />
+                )}
+              </figure>
+            </div>
+
+            <div className="result-actions">
+              <button type="button" className="btn btn-primary" onClick={download}>
+                ⬇️ Unduh PNG (ukuran penuh)
+              </button>
+            </div>
+          </section>
+        </>
+      )}
+    </div>
   );
 }

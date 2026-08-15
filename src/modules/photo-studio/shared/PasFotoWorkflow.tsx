@@ -22,6 +22,8 @@ interface PasFotoWorkflowProps {
   header?: { title: string; description: string; icon: string };
   /** Sembunyikan header (dipakai modul yang merender header sendiri, mis. Custom Size). */
   showHeader?: boolean;
+  /** Gambar awal (data URL) yang langsung masuk ke langkah crop, mis. hasil modul lain. */
+  initialImage?: string;
 }
 
 const clampInt = (raw: string, min: number, max: number) => {
@@ -42,6 +44,7 @@ export default function PasFotoWorkflow({
   presets,
   header,
   showHeader = true,
+  initialImage,
 }: PasFotoWorkflowProps) {
   const DEFAULT_MARGIN_CM = 0.5;
 
@@ -50,10 +53,14 @@ export default function PasFotoWorkflow({
   const maxC = maxCols(activeSize);
   const maxR = maxRows(activeSize);
 
-  const [step, setStep] = useState<Step>("upload");
-  const [originalUrl, setOriginalUrl] = useState<string | null>(null);
+  const [step, setStep] = useState<Step>(initialImage ? "edit" : "upload");
+  const [originalUrl, setOriginalUrl] = useState<string | null>(
+    initialImage ?? null
+  );
   const [croppedUrl, setCroppedUrl] = useState<string | null>(null);
-  const [fileName, setFileName] = useState("");
+  const [fileName, setFileName] = useState(
+    initialImage ? "gambar-import.png" : ""
+  );
   const [error, setError] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const [cols, setCols] = useState(maxCols(activeSize, DEFAULT_MARGIN_CM));

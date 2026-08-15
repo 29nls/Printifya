@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import type { PasFotoSize } from "../../photo-studio/shared/pasFotoSize";
 import CropperEditor from "../../photo-studio/shared/CropperEditor";
+import { setPendingPasFoto } from "../../shared/pasFotoBridge";
 import "../../photo-studio/shared/style.css";
 
 /** Rasio output pas foto yang didukung Auto Crop Face. */
@@ -66,6 +68,7 @@ export default function AutoCropFacePage() {
   const [error, setError] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
 
   // Bersihkan object URL lama saat diganti / komponen dilepas.
   useEffect(() => {
@@ -110,6 +113,13 @@ export default function AutoCropFacePage() {
     a.href = croppedUrl;
     a.download = `${size.fileName}.png`;
     a.click();
+  };
+
+  /** Teruskan hasil crop ke alur Pas Foto 3x4 (crop ulang + template A4). */
+  const forwardToPasFoto = () => {
+    if (!croppedUrl) return;
+    setPendingPasFoto(croppedUrl);
+    navigate("/photo-studio/pas-foto-3x4");
   };
 
   return (
@@ -244,6 +254,13 @@ export default function AutoCropFacePage() {
               </ul>
 
               <div className="result-actions">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={forwardToPasFoto}
+                >
+                  🪪 Jadikan Pas Foto 3x4
+                </button>
                 <button
                   type="button"
                   className="btn btn-primary"

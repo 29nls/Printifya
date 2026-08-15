@@ -1,8 +1,10 @@
 import { useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   applyBackgroundColor,
   removeBackground,
 } from "./bgRemove";
+import { setPendingPasFoto } from "../../shared/pasFotoBridge";
 import "../../photo-studio/shared/style.css";
 import "./style.css";
 
@@ -36,6 +38,7 @@ export default function BackgroundRemovalPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   // Kanvas hasil transparan (sumber untuk pewarnaan ulang tanpa reproses).
   const transparentRef = useRef<HTMLCanvasElement | null>(null);
+  const navigate = useNavigate();
 
   const handleFile = (file?: File | null) => {
     setError("");
@@ -106,6 +109,13 @@ export default function BackgroundRemovalPage() {
     a.href = resultUrl;
     a.download = `background-removed-${bgId}.png`;
     a.click();
+  };
+
+  /** Teruskan hasil (dengan warna latar terpilih) ke alur crop Pas Foto 3x4. */
+  const forwardToPasFoto = () => {
+    if (!resultUrl) return;
+    setPendingPasFoto(resultUrl);
+    navigate("/photo-studio/pas-foto-3x4");
   };
 
   return (
@@ -260,6 +270,13 @@ export default function BackgroundRemovalPage() {
             {warning && <p className="error">{warning}</p>}
 
             <div className="result-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={forwardToPasFoto}
+              >
+                🪪 Jadikan Pas Foto 3x4
+              </button>
               <button
                 type="button"
                 className="btn btn-primary"
