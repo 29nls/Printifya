@@ -18,19 +18,36 @@ const DENOISE_MAP: Record<number, { radius: number; blend: number }> = {
   3: { radius: 2, blend: 1 },
 };
 
+/** Kanvas perantara pipeline — HTMLCanvasElement di thread utama,
+ *  OffscreenCanvas di worker (API 2D yang dipakai identik). */
+export type CanvasLike = HTMLCanvasElement | OffscreenCanvas;
+
+/** Pembuat kanvas perantara. Default membuat HTMLCanvasElement (thread
+ *  utama); worker memanggil setCanvasFactory dengan OffscreenCanvas karena
+ *  di sana tidak ada document.createElement. */
+let createCanvas: (w: number, h: number) => CanvasLike = (w, h) => {
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  return c;
+};
+
+/** Ganti pembuat kanvas (dipakai worker: `new OffscreenCanvas(w, h)`). */
+export function setCanvasFactory(fn: (w: number, h: number) => CanvasLike): void {
+  createCanvas = fn;
+}
+
 /** Perbesar canvas ke dimensi target; bila >2x, resize bertahap agar
  *  interpolasi tidak menimbulkan jaggies (kualitas lebih baik dari sekali draw). */
 export function upscaleCanvas(
-  src: HTMLCanvasElement,
+  src: CanvasLike,
   scale: number
-): HTMLCanvasElement {
+): CanvasLike {
   const targetW = Math.max(1, Math.round(src.width * scale));
   const targetH = Math.max(1, Math.round(src.height * scale));
 
-  const step = (from: HTMLCanvasElement, w: number, h: number) => {
-    const c = document.createElement("canvas");
-    c.width = w;
-    c.height = h;
+  const step = (from: CanvasLike, w: number, h: number) => {
+    const c = createCanvas(w, h);
     const x = c.getContext("2d")!;
     x.imageSmoothingEnabled = true;
     x.imageSmoothingQuality = "high";
@@ -54,9 +71,9 @@ export function upscaleCanvas(
 /** Median filter per kanal (radius 1 = 3×3, radius 2 = 5×5) — mengurangi
  *  noise sambil menjaga tepi lebih baik daripada blur biasa. */
 export function denoiseCanvas(
-  src: HTMLCanvasElement,
+  src: CanvasLike,
   level: DenoiseLevel
-): HTMLCanvasElement {
+): CanvasLike {
   const { radius, blend } = DENOISE_MAP[level] ?? { radius: 0, blend: 0 };
   if (radius === 0) return src;
 
@@ -97,21 +114,17 @@ export function denoiseCanvas(
       out[o + 3] = data[o + 3];
     }
   }
-  const c = document.createElement("canvas");
-  c.width = width;
-  c.height = height;
+  const c = createCanvas(width, height);
   c.getContext("2d")!.putImageData(new ImageData(out, width, height), 0, 0);
   return c;
 }
 
 /** Rotasi 90° (kelipatan), lossless untuk kelipatan 90°. */
-function rotate90(src: HTMLCanvasElement, quarters: number): HTMLCanvasElement {
+function rotate90(src: CanvasLike, quarters: number): CanvasLike {
   const q = ((quarters % 4) + 4) % 4;
   if (q === 0) return src;
   const swap = q % 2 === 1;
-  const c = document.createElement("canvas");
-  c.width = swap ? src.height : src.width;
-  c.height = swap ? src.width : src.height;
+  const c = createCanvas(swap ? src.height : src.width, swap ? src.width : src.height);
   const x = c.getContext("2d")!;
   x.translate(c.width / 2, c.height / 2);
   x.rotate((q * 90 * Math.PI) / 180);
@@ -120,7 +133,7 @@ function rotate90(src: HTMLCanvasElement, quarters: number): HTMLCanvasElement {
 }
 
 /** Rata-rata beberapa canvas berukuran sama (untuk TTA). */
-function averageCanvases(canvases: HTMLCanvasElement[]): HTMLCanvasElement {
+function averageCanvases(canvases: CanvasLike[]): CanvasLike {
   const { width, height } = canvases[0];
   const acc = new Float64Array(width * height * 4);
   for (const cv of canvases) {
@@ -130,9 +143,7 @@ function averageCanvases(canvases: HTMLCanvasElement[]): HTMLCanvasElement {
   const out = new Uint8ClampedArray(width * height * 4);
   const n = canvases.length;
   for (let i = 0; i < acc.length; i++) out[i] = Math.round(acc[i] / n);
-  const c = document.createElement("canvas");
-  c.width = width;
-  c.height = height;
+  const c = createCanvas(width, height);
   c.getContext("2d")!.putImageData(new ImageData(out, width, height), 0, 0);
   return c;
 }
@@ -146,7 +157,7 @@ export interface ProcessOptions {
 
 /** Jalankan pipeline Waifu2x-lite: upscale → (denoise) → (TTA average). */
 export function processImage(
-  src: HTMLCanvasElement,
+  src: CanvasLike,
   { scale, denoise, tta }: ProcessOptions
 ): HTMLCanvasElement {
   const angles = tta ? [0, 1, 2, 3] : [0];
@@ -159,23 +170,38 @@ export function processImage(
   return variants.length > 1 ? averageCanvases(variants) : variants[0];
 }
 
-/** Encode canvas ke blob sesuai format & kualitas (jpg/webp memakai quality). */
+/** MIME untuk format output. */
+function mimeOf(format: OutFormat): string {
+  return format === "jpg" ? "image/jpeg" : format === "webp" ? "image/webp" : "image/png";
+}
+
+/** Encode canvas (HTML) ke blob sesuai format & kualitas (jpg/webp memakai quality). */
 export function canvasToBlob(
   canvas: HTMLCanvasElement,
   format: OutFormat,
   quality: number
 ): Promise<Blob> {
-  const type = format === "jpg" ? "image/jpeg" : format === "webp" ? "image/webp" : "image/png";
   return new Promise((resolve, reject) => {
     canvas.toBlob(
       (blob) => {
         if (blob) resolve(blob);
         else reject(new Error("Gagal meng-encode gambar."));
       },
-      type,
+      mimeOf(format),
       quality
     );
   });
+}
+
+/** Encode canvas apa pun (HTML atau Offscreen) ke blob — worker memakai
+ *  OffscreenCanvas.convertToBlob, thread utama canvas.toBlob. */
+export function canvasLikeToBlob(
+  c: CanvasLike,
+  format: OutFormat,
+  quality: number
+): Promise<Blob> {
+  if ("convertToBlob" in c) return c.convertToBlob({ type: mimeOf(format), quality });
+  return canvasToBlob(c, format, quality);
 }
 
 export interface FormatStat {
