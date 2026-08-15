@@ -4,9 +4,10 @@
  * dan akses dibungkus try/catch.
  *
  * Yang disimpan: grid (kolom/baris/margin), label (tampilkan nama, ukuran
- * label), bingkai photobox & garis potong — dipakai sebagai nilai default
- * pada kunjungan berikutnya. Kolom/baris di-clamp terhadap preset ukuran
- * aktif oleh pemanggil (batas maks berbeda per ukuran pas foto).
+ * label), bingkai photobox, garis potong & teks kustom bingkai Booth
+ * (hashtag/banner) — dipakai sebagai nilai default pada kunjungan berikutnya.
+ * Kolom/baris di-clamp terhadap preset ukuran aktif oleh pemanggil (batas
+ * maks berbeda per ukuran pas foto).
  */
 
 import {
@@ -29,6 +30,10 @@ export interface LayoutSettings {
   frameId: string;
   /** Garis potong putus-putus antar sel (sekat setelah cetak). */
   cutLines: boolean;
+  /** Teks kustom strip hashtag bingkai Booth; default "#SENYUM". */
+  boothHashtag: string;
+  /** Teks kustom banner PHOTO BOOTH; default "PHOTO BOOTH". */
+  boothBanner: string;
 }
 
 const LABEL_SIZES = ["small", "medium", "large"];
@@ -51,6 +56,10 @@ export function loadLayoutSettings(): Partial<LayoutSettings> | null {
       frameId: typeof p.frameId === "string" ? p.frameId : undefined,
       cutLines:
         typeof p.cutLines === "boolean" ? p.cutLines : undefined,
+      boothHashtag:
+        typeof p.boothHashtag === "string" ? p.boothHashtag : undefined,
+      boothBanner:
+        typeof p.boothBanner === "string" ? p.boothBanner : undefined,
     };
   });
 }

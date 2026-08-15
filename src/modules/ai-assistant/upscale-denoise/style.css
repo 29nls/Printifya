@@ -139,6 +139,34 @@
   font-size: 12px;
 }
 
+/* Legenda kecil di bawah tabel — arti "∞ dB" (rekonstruksi identik) dan
+ * "—" (gagal decode). */
+.w2x-formats .legend {
+  margin: 6px 0 0;
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.w2x-formats .legend strong {
+  color: var(--text);
+}
+
+/* Badge "terbaik" pada baris teratas tabel Format (setelah diurutkan). */
+.w2x-formats .w2x-best {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  background: var(--accent);
+  color: #fff;
+  vertical-align: middle;
+}
+
 .w2x-progress {
   margin-top: 12px;
   display: flex;
@@ -219,8 +247,14 @@
 }
 
 .w2x-run {
-  width: 100%;
+  flex: 1;
   margin-top: 4px;
+}
+
+/* Baris tombol Proses Semua + Batal (Batal tampil hanya saat batch berjalan). */
+.w2x-run-row {
+  display: flex;
+  gap: 8px;
 }
 
 /* Baris preferensi (awalan label + tombol reset). */

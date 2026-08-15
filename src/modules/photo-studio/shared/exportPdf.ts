@@ -5,7 +5,8 @@ import {
   computeSheetLayout,
   fitsA4,
   orientedDims,
-  sheetCellXY,
+  sheetCellRect,
+  sheetLabelBarMm,
   sheetPageCount,
   type SheetOrientation,
 } from "./sheetLayout";
@@ -113,19 +114,21 @@ async function buildSheetDoc(
     for (let i = 0; i < layout.count; i++) {
       const idx = page * layout.count + i;
       if (idx >= jpegs.length) break; // halaman terakhir boleh tidak penuh
-      const { x, y } = sheetCellXY(i, cols, size, layout);
-      doc.addImage(jpegs[idx], "JPEG", x, y, size.widthMm, size.heightMm);
+      // Posisi & ukuran sel absolut dari sumber tunggal (sheetLayout).
+      const cell = sheetCellRect(i, cols, size.widthMm, size.heightMm, layout);
+      doc.addImage(jpegs[idx], "JPEG", cell.x, cell.y, cell.w, cell.h);
 
       const label = labels?.[idx];
       if (label) {
-        const barH = labelSize * 0.55 + 1; // mm
-        const barY = y + size.heightMm - barH;
+        // Area label di dasar sel (mm) — hitungan bersama pratinjau/cetak.
+        const bar = sheetLabelBarMm(cell.h, labelSize);
+        const barY = cell.y + bar.y;
         doc.setFillColor(0, 0, 0);
-        doc.rect(x, barY, size.widthMm, barH, "F");
+        doc.rect(cell.x, barY, cell.w, bar.h, "F");
         doc.setFontSize(labelSize);
         doc.setTextColor(255, 255, 255);
-        const line = doc.splitTextToSize(label, size.widthMm - 2)[0] ?? "";
-        doc.text(line, x + size.widthMm / 2, barY + barH - 0.8, {
+        const line = doc.splitTextToSize(label, cell.w - 2)[0] ?? "";
+        doc.text(line, cell.x + cell.w / 2, barY + bar.h - 0.8, {
           align: "center",
         });
       }
@@ -138,11 +141,11 @@ async function buildSheetDoc(
       doc.setDrawColor(150, 150, 150);
       doc.setLineDashPattern([0.8, 0.7], 0);
       for (let c = 1; c < cols; c++) {
-        const x = layout.marginX + c * size.widthMm;
+        const x = sheetCellRect(c, cols, size.widthMm, size.heightMm, layout).x;
         doc.line(x, layout.marginY, x, layout.marginY + layout.gridH);
       }
       for (let r = 1; r < rows; r++) {
-        const y = layout.marginY + r * size.heightMm;
+        const y = sheetCellRect(r * cols, cols, size.widthMm, size.heightMm, layout).y;
         doc.line(layout.marginX, y, layout.marginX + layout.gridW, y);
       }
       doc.restoreGraphicsState();

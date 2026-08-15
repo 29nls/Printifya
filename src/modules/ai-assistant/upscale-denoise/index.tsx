@@ -9,13 +9,16 @@ import {
   type FormatStat,
   type OutFormat,
 } from "./waifu2x";
-import type { Waifu2xWorkerResponse } from "./waifu2xWorkerApi";
+import type {
+  Waifu2xWorkerRequestNoId,
+  Waifu2xWorkerResponse,
+} from "./waifu2xWorkerApi";
 import { setPendingPasFoto } from "../../shared/pasFotoBridge";
 import {
   setPendingLayoutPhoto,
   setPendingLayoutPhotos,
 } from "../../shared/autoLayoutBridge";
-import { decideFormatToggle } from "./formatCompare";
+import { decideFormatToggle, sortFormatStats } from "./formatCompare";
 import {
   clearW2xOptions,
   DEFAULT_W2X_OPTIONS,
@@ -44,7 +47,11 @@ interface Item {
   /** Ukuran + PSNR tiap format (PNG/WebP/JPG) untuk perbandingan kualitas.
    *  Dihitung on-demand saat tabel "📊 Format" dibuka, lalu di-cache. */
   formats?: FormatStat[];
-  /** Kanvas hasil — sumber perbandingan format; dibuang setelah dipakai. */
+  /** Bitmap hasil (jalur worker) — referensi lossless untuk perbandingan
+   *  format; di-transfer kembali ke worker saat compare, lalu dibuang. */
+  resultBitmap?: ImageBitmap | null;
+  /** Kanvas hasil (jalur fallback tanpa worker) — sumber compare di thread
+   *  utama; dibuang setelah dipakai. */
   resultCanvas?: HTMLCanvasElement | null;
   error?: string;
 }
@@ -63,6 +70,57 @@ const DENOISE_LABELS: Record<number, string> = {
   3: "Tinggi",
 };
 
+/**
+ * Preset model gaya Waifu2x-Extension-GUI. Modul ini heuristik (tanpa
+ * jaringan saraf), jadi setiap nama model nyata dipetakan ke profil pipeline
+ * (skala/denoise/TTA) yang meniru perilakunya: HQ = kualitas tertinggi,
+ * Conservative = perubahan lebih hati-hati, Small = untuk foto kecil,
+ * Fast = cepat & universal. Kombinasi (scaleId, denoise, tta) tiap model
+ * unik, sehingga model aktif bisa diturunkan dari pengaturan saat ini. */
+interface ModelPreset {
+  id: string;
+  name: string;
+  desc: string;
+  scaleId: string; // "2x" | "4x"
+  denoise: DenoiseLevel;
+  tta: boolean;
+}
+
+const MODEL_PRESETS: ModelPreset[] = [
+  {
+    id: "photo-hq-w4x",
+    name: "Photo-HQ-W4xEX",
+    desc: "Kualitas tertinggi untuk foto — 4× + denoise Tinggi + TTA.",
+    scaleId: "4x",
+    denoise: 3,
+    tta: true,
+  },
+  {
+    id: "photo-conservative-x4",
+    name: "Photo-Conservative-x4",
+    desc: "Konservatif — 4× + denoise Sedang, detail asli lebih terjaga.",
+    scaleId: "4x",
+    denoise: 2,
+    tta: false,
+  },
+  {
+    id: "photo-small-w2x",
+    name: "Photo-Small-W2xEX",
+    desc: "Untuk foto kecil — 2× + denoise Sedang.",
+    scaleId: "2x",
+    denoise: 2,
+    tta: false,
+  },
+  {
+    id: "universal-fast-w2x",
+    name: "Universal-Fast-W2xEX",
+    desc: "Cepat & universal — 2× + denoise Rendah.",
+    scaleId: "2x",
+    denoise: 1,
+    tta: false,
+  },
+];
+
 function fmtSize(bytes: number): string {
   if (bytes <= 0) return "—";
   if (bytes < 1024) return `${bytes} B`;
@@ -75,6 +133,22 @@ const FMT_LABEL: Record<OutFormat, string> = {
   webp: "WebP",
   jpg: "JPG",
 };
+
+/** Batas aman pekerjaan batch paralel. Worker memproses serial (satu antrean
+ *  per-id), jadi di atas batas ini konkurrensi hanya menumpuk bitmap di
+ *  memori tanpa mempercepat batch. */
+const BATCH_CONCURRENCY_CAP = 6;
+/** Konkurrensi batch mengikuti jumlah inti (navigator.hardwareConcurrency)
+ *  agar batch besar memanfaatkan worker sebaik mungkin, dibatasi batas aman;
+ *  minimal 2 agar fase main-thread (fetch/decode item berikutnya) tetap
+ *  tumpang tindih dengan pemrosesan worker. */
+const BATCH_CONCURRENCY = Math.min(
+  BATCH_CONCURRENCY_CAP,
+  Math.max(
+    2,
+    typeof navigator !== "undefined" ? navigator.hardwareConcurrency || 2 : 2
+  )
+);
 
 export default function UpscaleDenoisePage() {
   const [items, setItems] = useState<Item[]>([]);
@@ -112,9 +186,26 @@ export default function UpscaleDenoisePage() {
   /** Pembatalan batch: disetel saat unmount agar loop tidak melanjutkan
    *  pemrosesan / update state setelah modul ditutup (pola cancelled flag). */
   const cancelledRef = useRef(false);
+  /** ImageBitmap hasil yang masih dipegang item — dibebaskan eksplisit saat
+   *  item dihapus / modul unmount (bukan hanya mengandalkan GC). */
+  const resultBitmapsRef = useRef<Set<ImageBitmap>>(new Set());
   const navigate = useNavigate();
 
   const scale = SCALE_PRESETS.find((s) => s.id === scaleId)?.value ?? customScale;
+
+  // Model aktif diturunkan dari pengaturan (kombinasi tiap preset unik):
+  // bila pengguna mengubah skala/denoise/TTA manual, model otomatis menjadi
+  // "kustom" tanpa state tambahan.
+  const activeModel = MODEL_PRESETS.find(
+    (p) => p.scaleId === scaleId && p.denoise === denoise && p.tta === tta
+  );
+
+  /** Terapkan preset model: atur skala/denoise/TTA sesuai profilnya. */
+  const applyModel = (p: ModelPreset) => {
+    setScaleId(p.scaleId);
+    setDenoise(p.denoise);
+    setTta(p.tta);
+  };
 
   // Pipeline berat (upscale/denoise/TTA) dijalankan di Web Worker + OffscreenCanvas
   // agar batch tidak membekukan UI; fallback thread utama bila tidak didukung.
@@ -122,6 +213,10 @@ export default function UpscaleDenoisePage() {
     typeof OffscreenCanvas !== "undefined" && typeof Worker !== "undefined";
   const workerRef = useRef<Worker | null>(null);
   const workerSeqRef = useRef(0);
+  /** Penolak promise postWorker yang masih menunggu balasan — saat Batal,
+   *  semua permintaan tertunda ditolak sekaligus agar pool berhenti seketika
+   *  (bukan menunggu worker menyelesaikan antrean). */
+  const pendingWorkerRef = useRef<Set<(e: Error) => void>>(new Set());
 
   const getWorker = (): Worker => {
     if (!workerRef.current) {
@@ -133,48 +228,44 @@ export default function UpscaleDenoisePage() {
     return workerRef.current;
   };
 
-  /** Kirim satu gambar ke worker; resolve saat balasan dengan id cocok tiba. */
-  const runInWorker = (
-    bitmap: ImageBitmap,
-    options: { scale: number; denoise: DenoiseLevel; tta: boolean },
-    format: OutFormat,
-    quality: number
-  ): Promise<Extract<Waifu2xWorkerResponse, { ok: true }>> => {
+  /** Kirim satu pekerjaan (process/compare) ke worker; resolve saat balasan
+   *  dengan id cocok tiba. `bitmap` selalu dikirim via transfer (tanpa salin).
+   *  Penolak dicatat di pendingWorkerRef agar Batal bisa menolak permintaan
+   *  yang masih menunggu (setelah worker di-terminate, tidak ada event lagi). */
+  const postWorker = (
+    msg: Waifu2xWorkerRequestNoId,
+    transfer: Transferable[]
+  ): Promise<Waifu2xWorkerResponse> => {
     const worker = getWorker();
     const id = ++workerSeqRef.current;
     return new Promise((resolve, reject) => {
-      const onMessage = (e: MessageEvent<Waifu2xWorkerResponse>) => {
-        if (e.data.id !== id) return;
+      const cleanup = () => {
         worker.removeEventListener("message", onMessage);
         worker.removeEventListener("error", onError);
-        if (e.data.ok) resolve(e.data);
-        else reject(new Error(e.data.error));
+        pendingWorkerRef.current.delete(reject);
+      };
+      const onMessage = (e: MessageEvent<Waifu2xWorkerResponse>) => {
+        if (e.data.id !== id) return;
+        cleanup();
+        resolve(e.data);
       };
       const onError = () => {
-        worker.removeEventListener("message", onMessage);
+        cleanup();
         reject(new Error("Worker gagal memproses gambar."));
       };
+      pendingWorkerRef.current.add(reject);
       worker.addEventListener("message", onMessage);
       worker.addEventListener("error", onError);
-      worker.postMessage({ id, bitmap, options, format, quality }, [bitmap]);
+      worker.postMessage({ ...msg, id }, transfer);
     });
-  };
-
-  /** Salin ImageBitmap hasil ke kanvas (referensi perbandingan format), lalu
-   *  bebaskan bitmap. */
-  const bitmapToCanvas = (bmp: ImageBitmap): HTMLCanvasElement => {
-    const c = document.createElement("canvas");
-    c.width = bmp.width;
-    c.height = bmp.height;
-    c.getContext("2d")!.drawImage(bmp, 0, 0);
-    bmp.close();
-    return c;
   };
 
   useEffect(
     () => () => {
       cancelledRef.current = true;
       urlsRef.current.forEach((u) => URL.revokeObjectURL(u));
+      resultBitmapsRef.current.forEach((b) => b.close());
+      resultBitmapsRef.current.clear();
       workerRef.current?.terminate();
       workerRef.current = null;
     },
@@ -243,7 +334,13 @@ export default function UpscaleDenoisePage() {
 
   const removeItem = (id: string) => {
     const it = items.find((x) => x.id === id);
-    if (it) URL.revokeObjectURL(it.origUrl);
+    if (it) {
+      URL.revokeObjectURL(it.origUrl);
+      if (it.resultBitmap) {
+        resultBitmapsRef.current.delete(it.resultBitmap);
+        it.resultBitmap.close();
+      }
+    }
     setItems((prev) => prev.filter((x) => x.id !== id));
     if (compareId === id) setCompareId(null);
   };
@@ -254,33 +351,59 @@ export default function UpscaleDenoisePage() {
       prev.map((x) => (x.id === it.id ? { ...x, status: "memproses" } : x))
     );
     try {
-      let out: HTMLCanvasElement;
       let blob: Blob;
+      let resultW = 0;
+      let resultH = 0;
+      let resultBitmap: ImageBitmap | null = null;
+      let fallbackCanvas: HTMLCanvasElement | null = null;
       if (offscreenWorker) {
         // Jalur worker: decode ImageBitmap (off-main-thread), transfer ke
         // worker, pipeline di OffscreenCanvas, hasil balik sebagai blob +
-        // bitmap. Thread utama hanya menyalin bitmap hasil ke kanvas (cepat).
+        // bitmap. Thread utama TIDAK menggambar apa pun — bitmap hasil
+        // disimpan apa adanya (referensi compare, di-transfer balik saat
+        // tabel "📊 Format" dibuka).
         const bmp = await fetch(it.origUrl)
           .then((r) => r.blob())
           .then((b) => createImageBitmap(b));
-        if (cancelledRef.current) return;
-        const res = await runInWorker(bmp, { scale, denoise, tta }, outFormat, quality / 100);
-        if (cancelledRef.current) return;
-        out = bitmapToCanvas(res.bitmap);
+        if (cancelledRef.current) {
+          // Dibatalkan saat decode — bebaskan bitmap sumber (belum di-transfer).
+          bmp.close();
+          return;
+        }
+        const res = await postWorker(
+          { type: "process", bitmap: bmp, options: { scale, denoise, tta }, format: outFormat, quality: quality / 100 },
+          [bmp]
+        );
+        if (cancelledRef.current) {
+          // Dibatalkan saat worker memproses — balikan yang sudah tiba dibuang;
+          // bitmap hasil (jika ada) dibebaskan agar tidak bocor ke GC.
+          if (res.ok && res.type === "process") res.bitmap.close();
+          return;
+        }
+        if (!res.ok) throw new Error(res.error);
+        if (res.type !== "process") throw new Error("Respons worker tak terduga.");
         blob = res.blob;
+        resultW = res.width;
+        resultH = res.height;
+        resultBitmap = res.bitmap;
+        resultBitmapsRef.current.add(res.bitmap);
       } else {
         // Fallback browser lama (tanpa OffscreenCanvas): pipeline di thread
         // utama — factory default membuat HTMLCanvasElement.
         const src = await loadImageToCanvas(it.origUrl);
+        if (cancelledRef.current) return;
         const processed = processImage(src, { scale, denoise, tta });
         blob = await canvasLikeToBlob(processed, outFormat, quality / 100);
-        out = processed as HTMLCanvasElement;
+        fallbackCanvas = processed as HTMLCanvasElement;
+        resultW = processed.width;
+        resultH = processed.height;
       }
       const url = URL.createObjectURL(blob);
       urlsRef.current.push(url);
       // Perbandingan format TIDAK dihitung di sini — mahal (3 encode + PSNR
-      // resolusi penuh) dan tidak selalu dibutuhkan. Kanvas hasil disimpan
-      // sementara di item; tabel "📊 Format" menghitungnya on-demand.
+      // resolusi penuh) dan tidak selalu dibutuhkan. Referensi compare
+      // (bitmap di jalur worker, kanvas di jalur fallback) disimpan di item;
+      // tabel "📊 Format" menghitungnya on-demand (di worker).
       setItems((prev) =>
         prev.map((x) =>
           x.id === it.id
@@ -288,17 +411,22 @@ export default function UpscaleDenoisePage() {
                 ...x,
                 status: "selesai",
                 resultUrl: url,
-                resultW: out.width,
-                resultH: out.height,
+                resultW,
+                resultH,
                 usedScale: scale,
                 usedFormat: outFormat,
                 formats: undefined,
-                resultCanvas: out,
+                resultBitmap,
+                resultCanvas: fallbackCanvas,
               }
             : x
         )
       );
     } catch (e) {
+      // Dibatal? Item sudah dikembalikan ke "menunggu" oleh cancelBatch —
+      // jangan menandai "gagal" untuk pembatalan (termasuk reject postWorker
+      // dari Batal/terminate).
+      if (cancelledRef.current) return;
       setItems((prev) =>
         prev.map((x) =>
           x.id === it.id
@@ -311,9 +439,9 @@ export default function UpscaleDenoisePage() {
 
   /** Buka tabel perbandingan format (PNG/WebP/JPG) untuk satu item.
    *  Dihitung on-demand dengan indikator loading, hasil di-cache di item
-   *  (buka ulang instan); kanvas hasil dibuang setelah dipakai. Keputusan
-   *  toggle (cache / guard per-id / tutup) dihitung murni di
-   *  `decideFormatToggle` agar bisa diuji unit. */
+   *  (buka ulang instan); referensi compare (bitmap/kanvas) dibuang setelah
+   *  dipakai. Keputusan toggle (cache / guard per-id / tutup) dihitung murni
+   *  di `decideFormatToggle` agar bisa diuji unit. */
   const toggleFormats = async (it: Item) => {
     const decision = decideFormatToggle(it, {
       openId: showFormats,
@@ -327,12 +455,37 @@ export default function UpscaleDenoisePage() {
     if (decision.action !== "compute") return; // cache / sedang dihitung
     setFormatLoading((prev) => new Set(prev).add(it.id));
     try {
-      const canvas =
-        it.resultCanvas ?? (await loadImageToCanvas(it.resultUrl!));
-      const formats = await compareFormats(canvas, quality);
+      let formats: FormatStat[];
+      if (offscreenWorker) {
+        // Jalur worker: transfer bitmap hasil (referensi lossless, tanpa
+        // salin) ke worker — encode PNG/WebP/JPG + PSNR terjadi di sana,
+        // thread utama tidak menyentuh tabel sama sekali. Bila bitmap tidak
+        // ada ATAU sudah detached (width/height 0 — sudah di-transfer/ditutup
+        // oleh compare yang gagal), buat baru dari URL hasil agar retry tidak
+        // pernah mengirim bitmap terdetach ke worker.
+        let bmp = it.resultBitmap;
+        if (!bmp || bmp.width === 0 || bmp.height === 0) {
+          const blob = await fetch(it.resultUrl!).then((r) => r.blob());
+          bmp = await createImageBitmap(blob);
+        }
+        const res = await postWorker({ type: "compare", bitmap: bmp, quality }, [bmp]);
+        if (!res.ok) throw new Error(res.error);
+        if (res.type !== "compare") throw new Error("Respons worker tak terduga.");
+        formats = res.stats;
+        // Bitmap telah di-transfer (netral di thread utama) — lepas dari
+        // pelacakan tanpa close.
+        resultBitmapsRef.current.delete(bmp);
+      } else {
+        // Fallback browser lama: compare di thread utama (perilaku lama).
+        const canvas =
+          it.resultCanvas ?? (await loadImageToCanvas(it.resultUrl!));
+        formats = await compareFormats(canvas, quality);
+      }
       setItems((prev) =>
         prev.map((x) =>
-          x.id === it.id ? { ...x, formats, resultCanvas: null } : x
+          x.id === it.id
+            ? { ...x, formats, resultBitmap: null, resultCanvas: null }
+            : x
         )
       );
     } catch (e) {
@@ -348,9 +501,38 @@ export default function UpscaleDenoisePage() {
     }
   };
 
+  /** Hentikan batch di tengah jalan: semua permintaan worker yang masih
+   *  tertunda ditolak & worker di-terminate (antrean dibatalkan seketika,
+   *  bukan menunggu selesai), pool berhenti menarik item baru, dan semua item
+   *  belum selesai dikembalikan ke "menunggu" agar batch bisa diulang. State
+   *  tetap hidup — hanya pemrosesan yang dibatalkan. */
+  const cancelBatch = () => {
+    if (!processing) return;
+    cancelledRef.current = true;
+    pendingWorkerRef.current.forEach((reject) =>
+      reject(new Error("Batch dibatalkan."))
+    );
+    pendingWorkerRef.current.clear();
+    workerRef.current?.terminate();
+    workerRef.current = null;
+    setItems((prev) =>
+      prev.map((x) =>
+        x.status === "memproses" || x.status === "menunggu"
+          ? { ...x, status: "menunggu", error: undefined }
+          : x
+      )
+    );
+  };
+
   const runAll = async () => {
     if (processing) return;
-    const queue = items.filter((i) => i.status !== "selesai" && i.status !== "gagal");
+    // Prioritas ukuran: foto kecil diproses lebih dulu (area piksel naik) agar
+    // hasil pertama cepat muncul di batch campuran ukuran. Item tanpa dimensi
+    // (w/h belum terbaca saat upload) ditaruh paling akhir (dianggap besar).
+    // filter() membuat salinan, jadi sort tidak menyentuh state items.
+    const queue = items
+      .filter((i) => i.status !== "selesai" && i.status !== "gagal")
+      .sort((a, b) => (a.w * a.h || Infinity) - (b.w * b.h || Infinity));
     if (queue.length === 0) {
       setError("Tidak ada foto yang menunggu. Upload foto dulu.");
       return;
@@ -359,13 +541,26 @@ export default function UpscaleDenoisePage() {
     cancelledRef.current = false;
     setProcessing(true);
     try {
-      for (const it of queue) {
-        if (cancelledRef.current) break;
-        await processOne(it);
-        // Yield antar item: badge progress & kontrol ter-update, browser
-        // tetap responsif di tengah batch (setelah item terakhir sekalipun).
-        await yieldToUi();
-      }
+      // Jalankan beberapa item sekaligus alih-alih berurutan: semua kerja
+      // berat ada di worker (pesan per-id), sehingga worker tidak pernah
+      // menunggu thread utama (fetch/decode item berikutnya berjalan saat
+      // item lain masih diproses). Badge per-item & progress bar ter-update
+      // karena tiap item selesai secara independen.
+      let next = 0;
+      const pool = Array.from(
+        { length: Math.min(BATCH_CONCURRENCY, queue.length) },
+        async () => {
+          while (next < queue.length) {
+            if (cancelledRef.current) return;
+            const it = queue[next++];
+            await processOne(it);
+            // Yield antar pekerjaan: badge progress & kontrol ter-update
+            // selama batch berjalan.
+            await yieldToUi();
+          }
+        }
+      );
+      await Promise.all(pool);
     } finally {
       setProcessing(false);
     }
@@ -498,10 +693,11 @@ export default function UpscaleDenoisePage() {
           <h1>Upscale &amp; Denoise</h1>
           <p>
             Perbesar resolusi &amp; kurangi noise foto bergaya{" "}
-            <strong>Waifu2x-Extension-GUI</strong> — skala 2×–8× atau kustom,
-            denoise 0–3, TTA, batch, dan perbandingan sebelum/sesudah.
-            Implementasi heuristik (resize bertahap + median filter), tanpa
-            jaringan saraf.
+            <strong>Waifu2x-Extension-GUI</strong> — preset model
+            (Photo-HQ-W4xEX, Photo-Conservative-x4, Photo-Small-W2xEX,
+            Universal-Fast-W2xEX), skala 2×–8×/kustom, denoise 0–3, TTA, batch,
+            dan perbandingan sebelum/sesudah. Implementasi heuristik (resize
+            bertahap + median filter), tanpa jaringan saraf.
           </p>
         </div>
       </header>
@@ -650,7 +846,7 @@ export default function UpscaleDenoisePage() {
                               </tr>
                             </thead>
                             <tbody>
-                              {it.formats.map((f) => (
+                              {sortFormatStats(it.formats).map((f, i) => (
                                 <tr
                                   key={f.format}
                                   className={
@@ -662,6 +858,17 @@ export default function UpscaleDenoisePage() {
                                   <td>
                                     {FMT_LABEL[f.format]}
                                     {f.format === it.usedFormat && " ✓"}
+                                    {/* Baris terbaik (setelah urut): badge
+                                        peringkat. Tidak tampil bila semua gagal
+                                        decode (psnrDb null semua). */}
+                                    {i === 0 && f.psnrDb != null && (
+                                      <span
+                                        className="w2x-best"
+                                        title="Kualitas terbaik menurut PSNR"
+                                      >
+                                        ⚡ terbaik
+                                      </span>
+                                    )}
                                   </td>
                                   <td>{fmtSize(f.size)}</td>
                                   <td>
@@ -681,8 +888,19 @@ export default function UpscaleDenoisePage() {
                             PSNR = perbandingan kualitas versi lossy terhadap
                             kanvas asli (makin tinggi makin dekat). Format yang
                             dipakai untuk unduhan ditandai ✓ — kualitas WebP/JPG
-                            mengikuti pengaturan ({quality}%).
+                            mengikuti pengaturan ({quality}%). Baris diurutkan
+                            dari kualitas terbaik ke terburuk.
                           </p>
+                          <div className="legend">
+                            <span>
+                              <strong>∞ dB</strong> = rekonstruksi identik
+                              (tanpa kehilangan)
+                            </span>
+                            <span>
+                              <strong>—</strong> = gagal di-decode di browser
+                              ini
+                            </span>
+                          </div>
                         </>
                       ) : (
                         <p className="hint">
@@ -714,6 +932,40 @@ export default function UpscaleDenoisePage() {
 
         <section className="panel">
           <h2>Pengaturan (Waifu2x-style)</h2>
+
+          <div className="w2x-field">
+            <span>Model (preset gaya Waifu2x-Extension-GUI)</span>
+            <div className="preset-picker">
+              {MODEL_PRESETS.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  title={m.desc}
+                  className={`chip ${activeModel?.id === m.id ? "active" : ""}`}
+                  onClick={() => applyModel(m)}
+                >
+                  {m.name}
+                </button>
+              ))}
+              <button
+                type="button"
+                className={`chip ${!activeModel ? "active" : ""}`}
+                onClick={() => {
+                  // Kustom: kembalikan ke profil manual default modul.
+                  setScaleId("4x");
+                  setDenoise(0);
+                  setTta(false);
+                }}
+              >
+                Kustom
+              </button>
+            </div>
+            <p className="hint">
+              Profil heuristik yang meniru model nyata Waifu2x-Extension-GUI
+              (tanpa jaringan saraf): memilih model mengatur skala, denoise,
+              dan TTA sekaligus. Mengubah pengaturan manual → Kustom.
+            </p>
+          </div>
 
           <div className="w2x-field">
             <span>Skala perbesaran</span>
@@ -819,14 +1071,28 @@ export default function UpscaleDenoisePage() {
             />
           </div>
 
-          <button
-            type="button"
-            className="btn btn-primary w2x-run"
-            disabled={processing || items.length === 0}
-            onClick={runAll}
-          >
-            {processing ? "Memproses…" : "⚡ Proses Semua"}
-          </button>
+          <div className="w2x-run-row">
+            <button
+              type="button"
+              className="btn btn-primary w2x-run"
+              disabled={processing || items.length === 0}
+              onClick={runAll}
+            >
+              {processing
+                ? `Memproses… (${doneCount}/${items.length} diproses)`
+                : "⚡ Proses Semua"}
+            </button>
+            {processing && (
+              <button
+                type="button"
+                className="btn w2x-run"
+                onClick={cancelBatch}
+                title="Hentikan batch: item yang menunggu berhenti, yang sedang diproses dikembalikan ke 'menunggu'"
+              >
+                ✋ Batal
+              </button>
+            )}
+          </div>
 
           <p className="hint">
             💡 Nama file hasil: <code>nama-{scale}x-waifu2x.{outFormat}</code>.

@@ -127,15 +127,64 @@ export function sheetPageCount(itemCount: number, cellsPerPage: number): number 
   return Math.max(1, Math.ceil(itemCount / cellsPerPage));
 }
 
-/** Posisi pojok kiri-atas sel ke-`i` pada lembar (mm), kiri-ke-kanan, atas-ke-bawah. */
-export function sheetCellXY(
+/** Posisi pojok kiri-atas & ukuran sel ke-`i` pada lembar — satuan mengikuti
+ *  layout (mm untuk tata letak asli, px untuk hasil `scaleSheetLayout`).
+ *  Kiri-ke-kanan, atas-ke-bawah; `cellW`/`cellH` dalam satuan yang sama. */
+export function sheetCellRect(
   i: number,
   cols: number,
-  size: PasFotoSize,
+  cellW: number,
+  cellH: number,
   layout: SheetLayout
-): { x: number; y: number } {
+): { x: number; y: number; w: number; h: number } {
   return {
-    x: layout.marginX + (i % cols) * size.widthMm,
-    y: layout.marginY + Math.floor(i / cols) * size.heightMm,
+    x: layout.marginX + (i % cols) * cellW,
+    y: layout.marginY + Math.floor(i / cols) * cellH,
+    w: cellW,
+    h: cellH,
   };
+}
+
+/** Skalakan seluruh layout dengan faktor (mis. mm → px pratinjau). `count`
+ *  tidak berubah; hasilnya dipakai `sheetCellRect`/`sheetCellAtPoint` dalam px. */
+export function scaleSheetLayout(layout: SheetLayout, factor: number): SheetLayout {
+  return {
+    gridW: layout.gridW * factor,
+    gridH: layout.gridH * factor,
+    marginX: layout.marginX * factor,
+    marginY: layout.marginY * factor,
+    count: layout.count,
+  };
+}
+
+/** Indeks sel yang memuat titik absolut (x, y) — kiri-ke-kanan, atas-ke-bawah;
+ *  -1 bila di luar area grid. Satuan (x, y, cellW, cellH, layout) harus sama
+ *  (mm atau px). Logika drag/posisi memakai ini agar sumber posisi tunggal. */
+export function sheetCellAtPoint(
+  x: number,
+  y: number,
+  cols: number,
+  rows: number,
+  cellW: number,
+  cellH: number,
+  layout: SheetLayout
+): number {
+  const gx = x - layout.marginX;
+  const gy = y - layout.marginY;
+  if (gx < 0 || gy < 0) return -1;
+  const col = Math.floor(gx / cellW);
+  const row = Math.floor(gy / cellH);
+  if (col >= cols || row >= rows) return -1;
+  return row * cols + col;
+}
+
+/** Area label di dasar sel (mm): tinggi batang dari ukuran font (pt) + padding
+ *  tetap, menempel di dasar sel. Sumber tunggal hitungan area label untuk
+ *  pratinjau/PDF/cetak (dipakai exportPdf untuk batang label). */
+export function sheetLabelBarMm(
+  cellH: number,
+  labelSizePt: number
+): { y: number; h: number } {
+  const h = labelSizePt * 0.55 + 1; // mm
+  return { y: cellH - h, h };
 }

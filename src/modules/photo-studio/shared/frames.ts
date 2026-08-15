@@ -1,21 +1,39 @@
 /**
- * Katalog bingkai foto bergaya photobox/fotobox — 50 bingkai prosedural yang
+ * Katalog bingkai foto bergaya photobox/fotobox — 60 bingkai prosedural yang
  * digambar langsung di canvas (tanpa aset eksternal), terinspirasi konvensi
  * frame foto booth: bingkai klasik, polaroid dengan area caption, gaya
  * vintage (scallop, renda, paku sudut), tema festif (hati, bintang, balon,
- * pernikahan, natal, lebaran, gradasi, confetti), dan gaya modern (minimal,
- * offset, radius + bayangan, film strip, kurung sudut).
+ * pernikahan, natal, lebaran, gradasi, confetti), gaya modern (minimal,
+ * offset, radius + bayangan, film strip, kurung sudut), dan gaya booth yang
+ * meniru elemen signature template photo booth populer (bunting, strip
+ * hashtag, banner "PHOTO BOOTH", washi tape, polka dots, garis pelangi,
+ * stempel tanggal, viewfinder kamera).
  *
- * Tiap bingkai adalah fungsi `draw(ctx, w, h)` yang melukis OVERLAY di atas
- * foto yang sudah digambar full-canvas. Ketebalan proporsional terhadap sisi
- * terpendek agar konsisten di semua ukuran pas foto.
+ * Tiap bingkai adalah fungsi `draw(ctx, w, h, opts?)` yang melukis OVERLAY di
+ * atas foto yang sudah digambar full-canvas. Ketebalan proporsional terhadap
+ * sisi terpendek agar konsisten di semua ukuran pas foto. Bingkai bertulisan
+ * Booth (hashtag & banner) menerima teks kustom lewat `opts`
+ * (hashtagText/bannerText) — dipakai Auto Layout untuk kustomisasi per event.
  */
+
+/** Opsi gambar bingkai — teks kustom untuk bingkai bertulisan Booth. */
+export interface FrameDrawOptions {
+  /** Teks strip hashtag (booth-hashtag, booth-hashtag-warna); default "#SENYUM". */
+  hashtagText?: string;
+  /** Teks banner (booth-banner); default "PHOTO BOOTH". */
+  bannerText?: string;
+}
 
 export interface PhotoFrame {
   id: string;
   name: string;
   category: string;
-  draw: (ctx: CanvasRenderingContext2D, w: number, h: number) => void;
+  draw: (
+    ctx: CanvasRenderingContext2D,
+    w: number,
+    h: number,
+    opts?: FrameDrawOptions
+  ) => void;
 }
 
 type Ctx = CanvasRenderingContext2D;
@@ -59,7 +77,9 @@ function border(
   ctx.fillRect(w - inset - th, inset, th, h - inset * 2);
 }
 
-/** Bingkai rounded (sudut membulat radius `r`) via evenodd. */
+/** Bingkai rounded (sudut membulat radius `r`) via evenodd: tepi luar DAN
+ *  lubang dalam sama-sama persegi bulat radius r — sudut dalam bingkai tidak
+ *  lagi kotak (sebelumnya lubang memakai rect bersudut tajam). */
 function roundedBorder(
   ctx: Ctx,
   w: number,
@@ -70,13 +90,8 @@ function roundedBorder(
 ): void {
   ctx.fillStyle = color;
   ctx.beginPath();
-  ctx.moveTo(r, 0);
-  ctx.arcTo(w, 0, w, h, r);
-  ctx.arcTo(w, h, 0, h, r);
-  ctx.arcTo(0, h, 0, 0, r);
-  ctx.arcTo(0, 0, w, 0, r);
-  ctx.closePath();
-  ctx.rect(th, th, w - th * 2, h - th * 2);
+  roundedRectPath(ctx, 0, 0, w, h, r);
+  roundedRectPath(ctx, th, th, w - th * 2, h - th * 2, r);
   ctx.fill("evenodd");
 }
 
@@ -209,8 +224,44 @@ function filmStrip(ctx: Ctx, w: number, h: number, bandPct: number): void {
   }
 }
 
+/**
+ * Teks terpusat dengan ukuran font proporsional (elemen template booth).
+ * Bila `maxWidth` diberikan dan teks lebih lebar dari itu, ukuran font
+ * diturunkan otomatis (minimal setengah ukuran dasar) agar teks kustom
+ * panjang tidak terpotong di band sempit / sel pas foto kecil.
+ */
+function centeredText(
+  ctx: Ctx,
+  text: string,
+  cx: number,
+  cy: number,
+  fs: number,
+  color: string,
+  maxWidth?: number
+): void {
+  ctx.fillStyle = color;
+  let size = fs;
+  const apply = (s: number) => {
+    ctx.font = `bold ${s}px Arial, sans-serif`;
+  };
+  apply(size);
+  if (maxWidth && maxWidth > 0) {
+    // Ukuran minimum: setengah ukuran dasar (tidak lebih kecil dari 3 px)
+    // agar teks tetap terbaca meski sangat panjang.
+    const floor = Math.max(3, fs * 0.5);
+    while (size > floor && ctx.measureText(text).width > maxWidth) {
+      // Clamp ke floor agar langkah terakhir tidak jatuh di bawah minimum.
+      size = Math.max(floor, size - 1);
+      apply(size);
+    }
+  }
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, cx, cy);
+}
+
 /* ===================================================================== *
- *  KATALOG 50 BINGKAI
+ *  KATALOG 60 BINGKAI
  * ===================================================================== */
 
 export const FRAMES: PhotoFrame[] = [
@@ -273,8 +324,202 @@ export const FRAMES: PhotoFrame[] = [
   { id: "modern-tick", name: "Tick", category: "Modern", draw: (c, w, h) => { const m = Math.min(w, h); border(c, w, h, 1, "#cccccc"); c.strokeStyle = "#cccccc"; c.lineWidth = 1; const n = 9; for (let i = 0; i <= n; i++) { const p = i / n; const x = p * w; const y = p * h; c.beginPath(); c.moveTo(x, 0); c.lineTo(x, Math.max(2, m * 0.02)); c.stroke(); c.beginPath(); c.moveTo(x, h); c.lineTo(x, h - Math.max(2, m * 0.02)); c.stroke(); c.beginPath(); c.moveTo(0, y); c.lineTo(Math.max(2, m * 0.02), y); c.stroke(); c.beginPath(); c.moveTo(w, y); c.lineTo(w - Math.max(2, m * 0.02), y); c.stroke(); } } },
   { id: "modern-garis-bawah", name: "Garis Bawah", category: "Modern", draw: (c, w, h) => { const m = Math.min(w, h); const th = Math.max(2, m * 0.03); c.fillStyle = "#c9a227"; c.fillRect(0, h - th, w, th); c.fillStyle = "#d64550"; const r = Math.max(2, m * 0.02); c.beginPath(); c.arc(w / 2, h - th / 2, r * 1.6, 0, Math.PI * 2); c.fill(); } },
   { id: "modern-dobel-radius", name: "Dobel Radius", category: "Modern", draw: (c, w, h) => { const m = Math.min(w, h); const th = tp(m, 5); const r = round(m * 0.1); roundedBorder(c, w, h, th, "#ffffff", r); c.strokeStyle = "#e0e0e0"; c.lineWidth = 1; const o = tp(m, 1); c.beginPath(); c.moveTo(r + th + o, th + o); c.arcTo(w - th - o, th + o, w - th - o, h - th - o, r); c.arcTo(w - th - o, h - th - o, th + o, h - th - o, r); c.arcTo(th + o, h - th - o, th + o, th + o, r); c.arcTo(th + o, th + o, w - th - o, th + o, r); c.stroke(); } },
-  { id: "modern-sudut-hitam", name: "Sudut Hitam", category: "Modern", draw: (c, w, h) => { const m = Math.min(w, h); const r = round(m * 0.22); const th = tp(m, 7); c.fillStyle = "#111111"; c.beginPath(); c.moveTo(0, r); c.arcTo(0, 0, r, 0, r); c.lineTo(w - r, 0); c.arcTo(w, 0, w, r, r); c.lineTo(w, h - r); c.arcTo(w, h, w - r, h, r); c.lineTo(r, h); c.arcTo(0, h, 0, h - r, r); c.closePath(); c.rect(th, th, w - th * 2, h - th * 2); c.fill("evenodd"); } },
+  { id: "modern-sudut-hitam", name: "Sudut Hitam", category: "Modern", draw: (c, w, h) => {
+    // Pola roundedBorder yang sama dengan bingkai rounded lain: tepi luar DAN
+    // lubang dalam sama-sama persegi bulat radius r (sebelumnya lubang dalam
+    // memakai rect bersudut tajam).
+    const m = Math.min(w, h);
+    roundedBorder(c, w, h, tp(m, 7), "#111111", round(m * 0.22));
+  } },
   { id: "modern-film", name: "Film Strip", category: "Modern", draw: (c, w, h) => filmStrip(c, w, h, 18) },
+
+  /* ---------- Booth (10) — elemen signature template photo booth ---------- */
+  // Bunting: tali + segitiga bendera warna-warni di tepi atas (classic party booth).
+  { id: "booth-bunting", name: "Bunting", category: "Booth", draw: (c, w, h) => {
+    const m = Math.min(w, h);
+    border(c, w, h, tp(m, 4), "#ffffff");
+    const y0 = tp(m, 4) * 0.6;
+    const n = 10;
+    const fw = w / n;
+    const fh = Math.max(3, m * 0.09);
+    c.strokeStyle = "rgba(0,0,0,0.25)";
+    c.lineWidth = Math.max(1, m * 0.008);
+    c.beginPath();
+    c.moveTo(0, y0);
+    c.lineTo(w, y0);
+    c.stroke();
+    for (let i = 0; i < n; i++) {
+      c.fillStyle = PALETTE[i % PALETTE.length];
+      const x = (i + 0.5) * fw;
+      c.beginPath();
+      c.moveTo(x - fw * 0.42, y0);
+      c.lineTo(x + fw * 0.42, y0);
+      c.lineTo(x, y0 + fh);
+      c.closePath();
+      c.fill();
+    }
+  } },
+  // Strip hashtag di bawah — gaya photo booth media sosial; teks kustom lewat
+  // opts.hashtagText (Auto Layout), default "#SENYUM".
+  { id: "booth-hashtag", name: "Hashtag", category: "Booth", draw: (c, w, h, opts) => {
+    const m = Math.min(w, h);
+    const bh = Math.max(4, m * 0.16);
+    border(c, w, h, tp(m, 4), "#ffffff");
+    c.fillStyle = "#111111";
+    c.fillRect(0, h - bh, w, bh);
+    centeredText(c, opts?.hashtagText || "#SENYUM", w / 2, h - bh / 2, Math.max(3, m * 0.09), "#ffffff", w * 0.92);
+  } },
+  // Banner header "PHOTO BOOTH" — papan judul khas template booth; teks kustom
+  // lewat opts.bannerText (Auto Layout), default "PHOTO BOOTH".
+  { id: "booth-banner", name: "Banner PHOTO BOOTH", category: "Booth", draw: (c, w, h, opts) => {
+    const m = Math.min(w, h);
+    const bh = Math.max(4, m * 0.16);
+    border(c, w, h, tp(m, 4), "#ffffff");
+    c.fillStyle = "#d64550";
+    c.fillRect(0, 0, w, bh);
+    centeredText(c, opts?.bannerText || "PHOTO BOOTH", w / 2, bh / 2, Math.max(3, m * 0.085), "#ffffff", w * 0.92);
+  } },
+  // Washi tape: potongan selotip dekoratif tembus pandang di sudut atas.
+  { id: "booth-washi", name: "Washi Tape", category: "Booth", draw: (c, w, h) => {
+    const m = Math.min(w, h);
+    border(c, w, h, tp(m, 4), "#ffffff");
+    const tapw = Math.max(6, m * 0.22);
+    const taph = Math.max(3, m * 0.055);
+    const o = tp(m, 4);
+    for (const [x, y, rot] of [
+      [o - 2, o - 2, -0.5],
+      [w - o - tapw + 2, o - 2, 0.5],
+    ] as Array<[number, number, number]>) {
+      c.save();
+      c.translate(x + tapw / 2, y + taph / 2);
+      c.rotate(rot);
+      c.fillStyle = "rgba(245, 212, 66, 0.75)";
+      c.fillRect(-tapw / 2, -taph / 2, tapw, taph);
+      c.restore();
+    }
+  } },
+  // Polka dots warna-warni di sepanjang bingkai putih — gaya pesta Canva.
+  { id: "booth-dots", name: "Titik Polka", category: "Booth", draw: (c, w, h) => {
+    const m = Math.min(w, h);
+    const bw = tp(m, 4);
+    border(c, w, h, bw, "#ffffff");
+    const n = 10;
+    const r = Math.max(1.5, m * 0.016);
+    for (let i = 0; i <= n; i++) {
+      const p = i / n;
+      const x = p * w;
+      const y = p * h;
+      for (const [dx, dy] of [
+        [x, bw / 2],
+        [x, h - bw / 2],
+        [bw / 2, y],
+        [w - bw / 2, y],
+      ] as Array<[number, number]>) {
+        c.fillStyle = PALETTE[i % PALETTE.length];
+        c.beginPath();
+        c.arc(dx, dy, r, 0, Math.PI * 2);
+        c.fill();
+      }
+    }
+  } },
+  // Garis pelangi diagonal (candy stripes) di keempat sisi, ter-clip di band.
+  { id: "booth-stripes", name: "Garis Pelangi", category: "Booth", draw: (c, w, h) => {
+    const m = Math.min(w, h);
+    const bw = tp(m, 6);
+    border(c, w, h, bw, "#ffffff");
+    c.save();
+    c.beginPath();
+    c.rect(0, 0, w, bw);
+    c.rect(0, h - bw, w, bw);
+    c.rect(0, 0, bw, h);
+    c.rect(w - bw, 0, bw, h);
+    c.clip();
+    const sw = Math.max(3, m * 0.05);
+    const stripes = Math.ceil(w / (sw * 1.6)) + 2;
+    for (let i = -1; i < stripes; i++) {
+      c.fillStyle = PALETTE[(i + 10) % PALETTE.length];
+      c.save();
+      c.translate(i * sw * 1.6, 0);
+      c.rotate(-0.6);
+      c.fillRect(0, -h, sw, h * 3);
+      c.restore();
+    }
+    c.restore();
+  } },
+  // Stempel tanggal: kotak putih garis putus-putus, sedikit miring, di pojok.
+  { id: "booth-stempel", name: "Stempel Tanggal", category: "Booth", draw: (c, w, h) => {
+    const m = Math.min(w, h);
+    border(c, w, h, tp(m, 4), "#ffffff");
+    const sw2 = Math.max(14, m * 0.3);
+    const sh2 = Math.max(8, m * 0.13);
+    const o = tp(m, 5);
+    c.save();
+    c.translate(w - sw2 / 2 - o, h - sh2 / 2 - o);
+    c.rotate(-0.12);
+    c.fillStyle = "rgba(255,255,255,0.92)";
+    c.fillRect(-sw2 / 2, -sh2 / 2, sw2, sh2);
+    c.strokeStyle = "#c0392b";
+    c.lineWidth = Math.max(1, m * 0.008);
+    c.setLineDash([Math.max(2, m * 0.03), Math.max(2, m * 0.02)]);
+    c.strokeRect(-sw2 / 2, -sh2 / 2, sw2, sh2);
+    c.setLineDash([]);
+    centeredText(c, "2026", 0, -sh2 * 0.12, Math.max(3, m * 0.05), "#333333");
+    centeredText(c, "BOOTH", 0, sh2 * 0.3, Math.max(2.5, m * 0.032), "#c0392b");
+    c.restore();
+  } },
+  // Viewfinder kamera: kurung sudut tebal + crosshair tengah.
+  { id: "booth-kamera", name: "Viewfinder", category: "Booth", draw: (c, w, h) => {
+    const m = Math.min(w, h);
+    border(c, w, h, tp(m, 3), "#ffffff");
+    c.strokeStyle = "#111111";
+    c.lineWidth = Math.max(2, m * 0.03);
+    const o = tp(m, 5);
+    const L = Math.max(6, m * 0.1);
+    c.beginPath();
+    c.moveTo(o, o + L); c.lineTo(o, o); c.lineTo(o + L, o);
+    c.moveTo(w - o - L, o); c.lineTo(w - o, o); c.lineTo(w - o, o + L);
+    c.moveTo(o, h - o - L); c.lineTo(o, h - o); c.lineTo(o + L, h - o);
+    c.moveTo(w - o - L, h - o); c.lineTo(w - o, h - o); c.lineTo(w - o, h - o - L);
+    c.stroke();
+    const cr = Math.max(2, m * 0.035);
+    const cl = Math.max(4, m * 0.07);
+    c.beginPath();
+    c.arc(w / 2, h / 2, cr, 0, Math.PI * 2);
+    c.stroke();
+    c.beginPath();
+    c.moveTo(w / 2 - cl, h / 2); c.lineTo(w / 2 + cl, h / 2);
+    c.moveTo(w / 2, h / 2 - cl); c.lineTo(w / 2, h / 2 + cl);
+    c.stroke();
+  } },
+  // Warna cerah: empat sisi berbeda warna (gaya color-block Canva).
+  { id: "booth-warna", name: "Warna Cerah", category: "Booth", draw: (c, w, h) => {
+    const m = Math.min(w, h);
+    border(c, w, h, tp(m, 2), "#ffffff");
+    const bw = tp(m, 5);
+    const cols = ["#f15bb5", "#00bbf9", "#ffe066", "#2a9d8f"];
+    c.fillStyle = cols[0]; c.fillRect(0, 0, w, bw);
+    c.fillStyle = cols[1]; c.fillRect(0, h - bw, w, bw);
+    c.fillStyle = cols[2]; c.fillRect(0, 0, bw, h);
+    c.fillStyle = cols[3]; c.fillRect(w - bw, 0, bw, h);
+  } },
+  // Hashtag + confetti dalam band: strip warna dengan bintik pesta; teks kustom
+  // lewat opts.hashtagText (Auto Layout), default "#SENYUM".
+  { id: "booth-hashtag-warna", name: "Hashtag Confetti", category: "Booth", draw: (c, w, h, opts) => {
+    const m = Math.min(w, h);
+    const bh = Math.max(4, m * 0.16);
+    border(c, w, h, tp(m, 3), "#ffffff");
+    c.fillStyle = "#d64550";
+    c.fillRect(0, h - bh, w, bh);
+    const rnd = seeded(41);
+    for (let i = 0; i < 14; i++) {
+      c.fillStyle = PALETTE[Math.floor(rnd() * PALETTE.length)];
+      const r = Math.max(1, m * 0.012);
+      c.beginPath();
+      c.arc(rnd() * w, h - bh + rnd() * bh, r, 0, Math.PI * 2);
+      c.fill();
+    }
+    centeredText(c, opts?.hashtagText || "#SENYUM", w / 2, h - bh / 2, Math.max(3, m * 0.085), "#ffffff", w * 0.92);
+  } },
 ];
 
 /** Cari bingkai berdasarkan id; `undefined` bila tidak ditemukan. */
@@ -282,16 +527,25 @@ export function getFrame(id: string): PhotoFrame | undefined {
   return FRAMES.find((f) => f.id === id);
 }
 
+/** Normalisasi id bingkai: kembalikan id bila ada di katalog, "" (Tanpa
+ *  bingkai) bila tidak dikenal atau kosong. Dipakai FramePicker sebagai
+ *  pertahanan lapisan kedua — konsumen lain tidak wajib memvalidasi manual. */
+export function validFrameId(id: string): string {
+  return getFrame(id) ? id : "";
+}
+
 /**
  * Terapkan bingkai ke gambar (URL): foto dimuat, dipotong cover agar mengisi
  * target (targetW × targetH px), lalu overlay bingkai digambar di atasnya.
- * Mengembalikan data URL PNG hasil.
+ * `opts` diteruskan ke draw (teks kustom bingkai Booth). Mengembalikan data
+ * URL PNG hasil.
  */
 export function applyFrame(
   url: string,
   frame: PhotoFrame,
   targetW: number,
-  targetH: number
+  targetH: number,
+  opts?: FrameDrawOptions
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -319,7 +573,7 @@ export function applyFrame(
         dh
       );
       try {
-        frame.draw(ctx, canvas.width, canvas.height);
+        frame.draw(ctx, canvas.width, canvas.height, opts);
       } catch {
         // bingkai gagal digambar — biarkan foto asli
       }

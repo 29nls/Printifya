@@ -44,3 +44,19 @@ export function decideFormatToggle(
   if (session.loading.has(item.id)) return { action: "in-flight" };
   return { action: "compute" };
 }
+
+/**
+ * Urutkan statistik format dari kualitas terbaik ke terburuk untuk tabel
+ * "📊 Format": PSNR lebih tinggi lebih baik; Infinity (rekonstruksi identik,
+ * lossless) menempati posisi paling atas; gagal decode (null) paling bawah.
+ * Tiebreaker: ukuran file lebih kecil menang (efisiensi pada kualitas sama).
+ * Mengembalikan salinan baru — array asli (cache item) tidak diubah.
+ */
+export function sortFormatStats(stats: readonly FormatStat[]): FormatStat[] {
+  return [...stats].sort((a, b) => {
+    const pa = a.psnrDb ?? -Infinity;
+    const pb = b.psnrDb ?? -Infinity;
+    if (pa !== pb) return pb - pa; // menurun; Infinity > finite > null→-Inf
+    return a.size - b.size; // tiebreak: ukuran lebih kecil lebih baik
+  });
+}

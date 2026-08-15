@@ -42,7 +42,8 @@
   border-radius: 10px;
 }
 
-.photo-label-input {
+.photo-label-input,
+.photo-booth-text-input {
   display: block;
   width: 96px;
   margin-top: 6px;
@@ -55,7 +56,8 @@
   background: var(--surface);
 }
 
-.photo-label-input:focus {
+.photo-label-input:focus,
+.photo-booth-text-input:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
@@ -107,6 +109,29 @@
   accent-color: var(--accent);
   width: 15px;
   height: 15px;
+}
+
+/* ---------- Input teks kustom bingkai Booth ---------- */
+
+.sheet-settings input[type="text"] {
+  width: 150px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--surface);
+}
+
+.sheet-settings input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
+}
+
+.booth-text-hint {
+  flex-basis: 100%;
+  margin: 0;
 }
 
 /* ---------- Kepala pratinjau + navigasi halaman ---------- */

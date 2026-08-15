@@ -217,9 +217,12 @@ export interface FormatStat {
  * PNG/WebP/JPG, lalu hitung PSNR (Peak Signal-to-Noise Ratio) tiap versi
  * lossy terhadap kanvas asli. PNG (lossless) menjadi referensi ukuran.
  * Bila format tak didukung browser, entry tetap ada dengan size 0 / PSNR null.
+ * Agnostik kanvas (HTMLCanvasElement / OffscreenCanvas) — worker menjalankan
+ * fungsi ini tanpa menyentuh thread utama; encode memakai canvasLikeToBlob
+ * (convertToBlob di worker) dan kanvas decode dari factory.
  */
 export async function compareFormats(
-  canvas: HTMLCanvasElement,
+  canvas: CanvasLike,
   quality: number
 ): Promise<FormatStat[]> {
   const src = canvas
@@ -229,11 +232,9 @@ export async function compareFormats(
 
   for (const fmt of ["png", "webp", "jpg"] as OutFormat[]) {
     try {
-      const blob = await canvasToBlob(canvas, fmt, quality / 100);
+      const blob = await canvasLikeToBlob(canvas, fmt, quality / 100);
       const bmp = await createImageBitmap(blob);
-      const c = document.createElement("canvas");
-      c.width = bmp.width;
-      c.height = bmp.height;
+      const c = createCanvas(bmp.width, bmp.height);
       const ctx = c.getContext("2d")!;
       ctx.drawImage(bmp, 0, 0);
       bmp.close();

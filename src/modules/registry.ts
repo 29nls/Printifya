@@ -34,6 +34,8 @@ const BackgroundRemovalPage = lazy(() => import("./ai-assistant/background-remov
 const EnhancePhotoPage = lazy(() => import("./ai-assistant/enhance-photo"));
 const AutoLayoutPage = lazy(() => import("./ai-assistant/auto-layout"));
 const UpscaleDenoisePage = lazy(() => import("./ai-assistant/upscale-denoise"));
+const FaceEnhancePage = lazy(() => import("./ai-assistant/face-enhance"));
+const VideoFaceEnhancePage = lazy(() => import("./ai-assistant/video-face-enhance"));
 
 export interface Module {
   id: string;
@@ -230,7 +232,8 @@ export const MODULES: Module[] = [
         title: "Auto Layout",
         path: "/ai-assistant/auto-layout",
         icon: "🧩",
-        description: "Susun banyak foto otomatis ke template halaman cetak.",
+        description:
+          "Susun banyak foto otomatis ke template halaman cetak — drag untuk mengatur urutan (lembar & strip), 60 bingkai photobox dengan teks Booth per foto, garis potong, ekspor PDF & cetak HTML.",
         Component: AutoLayoutPage,
       },
       {
@@ -239,8 +242,26 @@ export const MODULES: Module[] = [
         path: "/ai-assistant/upscale-denoise",
         icon: "⬆️",
         description:
-          "Perbesar resolusi & kurangi noise (gaya Waifu2x): skala 2×–8×/kustom, denoise 0–3, TTA, batch, perbandingan format & PSNR — pengaturan tersimpan, terusan ke pas foto & Auto Layout, tombol reset preferensi.",
+          "Perbesar resolusi & kurangi noise (gaya Waifu2x): preset model (Photo-HQ-W4xEX, Photo-Conservative-x4, Photo-Small-W2xEX, Universal-Fast-W2xEX), skala 2×–8×/kustom, denoise 0–3, TTA, batch, perbandingan format & PSNR — pengaturan tersimpan, terusan ke pas foto & Auto Layout, tombol reset preferensi.",
         Component: UpscaleDenoisePage,
+      },
+      {
+        id: "face-enhance",
+        title: "Face Enhance",
+        path: "/ai-assistant/face-enhance",
+        icon: "👤",
+        description:
+          "Pulihkan kualitas wajah (gaya CodeFormer): pemulusan kulit, koreksi warna & ketajaman pada area wajah dengan slider fidelitas w, perbaikan latar opsional, pulihkan warna foto lama, perbesaran 2×/4× SETELAH pemulihan (urutan CodeFormer → Real-ESRGAN) — perbandingan sebelum/sesudah, terusan ke pas foto & Auto Layout, preferensi tersimpan dengan tombol reset.",
+        Component: FaceEnhancePage,
+      },
+      {
+        id: "video-face-enhance",
+        title: "Video Face Enhance",
+        path: "/ai-assistant/video-face-enhance",
+        icon: "🎥",
+        description:
+          "Pulihkan kualitas wajah pada video (gaya PGTFormer, IJCAI'24): pemulihan wajah per frame (parsing-guided) dengan koherensi temporal tanpa pre-alignment, ekspor WebM/MP4 dengan track audio sumber dipertahankan (WebAudio → MediaStreamDestination), terusan frame ke pas foto & Auto Layout — preferensi tersimpan dengan tombol reset.",
+        Component: VideoFaceEnhancePage,
       },
     ],
   },

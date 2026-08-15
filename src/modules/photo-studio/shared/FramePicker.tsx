@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { FRAMES, getFrame } from "./frames";
+import { FRAMES, getFrame, validFrameId } from "./frames";
 
 interface FramePickerProps {
   value: string; // id bingkai; "" = tanpa bingkai
@@ -29,11 +29,22 @@ function drawDemo(ctx: CanvasRenderingContext2D): void {
 
 /**
  * Pemilih bingkai photobox: dropdown ber-grup per kategori (Klasik, Polaroid,
- * Vintage, Festif, Modern) + pratinjau mini live yang menggambar foto demo
- * dengan bingkai terpilih. Nilai `""` berarti tanpa bingkai.
+ * Vintage, Festif, Modern, Booth) + pratinjau mini live yang menggambar foto
+ * demo dengan bingkai terpilih. Nilai `""` berarti tanpa bingkai.
  */
 export default function FramePicker({ value, onChange }: FramePickerProps) {
   const previewRef = useRef<HTMLCanvasElement>(null);
+
+  // Pertahanan lapisan kedua: nilai yang tidak cocok katalog dinormalisasi ke
+  // "" (Tanpa bingkai) — pemilih tidak pernah kosong/blank dan framing tidak
+  // diam-diam no-op, apa pun yang diterima dari konsumen.
+  const effective = validFrameId(value);
+  const frame = getFrame(effective);
+
+  useEffect(() => {
+    // Perbaiki nilai basi di state induk (sekali; "" valid → tidak berulang).
+    if (value !== effective) onChange(effective);
+  }, [value, effective, onChange]);
 
   useEffect(() => {
     const canvas = previewRef.current;
@@ -42,7 +53,6 @@ export default function FramePicker({ value, onChange }: FramePickerProps) {
     if (!ctx) return;
     ctx.clearRect(0, 0, DEMO_W, DEMO_H);
     drawDemo(ctx);
-    const frame = getFrame(value);
     if (frame) {
       try {
         frame.draw(ctx, DEMO_W, DEMO_H);
@@ -50,7 +60,7 @@ export default function FramePicker({ value, onChange }: FramePickerProps) {
         // bingkai gagal — biarkan demo polos
       }
     }
-  }, [value]);
+  }, [frame]);
 
   const categories = [...new Set(FRAMES.map((f) => f.category))];
 
@@ -60,7 +70,7 @@ export default function FramePicker({ value, onChange }: FramePickerProps) {
         Bingkai (photobox)
         <select
           className="tool-select"
-          value={value}
+          value={effective}
           onChange={(e) => onChange(e.target.value)}
         >
           <option value="">Tanpa bingkai</option>

@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   computeSheetLayout,
   orientedDims,
+  scaleSheetLayout,
+  sheetCellAtPoint,
   type SheetOrientation,
 } from "./sheetLayout";
 import type { PasFotoSize } from "./pasFotoSize";
@@ -65,6 +67,7 @@ export default function A4SheetPreview({
   const p = getPaper(paper?.id ?? PAPER_A4.id);
   const d = orientedDims(p, orientation);
   const [fullSize, setFullSize] = useState(false);
+  const sheetRef = useRef<HTMLDivElement>(null);
   // Drag antar sel (hanya aktif bila onDropPhoto disediakan).
   const interactive = onDropPhoto !== undefined;
   const [dragFrom, setDragFrom] = useState<number | null>(null);
@@ -77,16 +80,34 @@ export default function A4SheetPreview({
   const scale = fullSize ? fullScale : fitScale;
 
   // Tata letak dihitung dalam mm oleh helper yang sama dengan PDF & cetak
-  // (grid + margin sentris), lalu diskalakan ke px pratinjau.
+  // (grid + margin sentris), lalu diskalakan ke px pratinjau. Geometri sel
+  // (posisi & area label) juga berasal dari sumber tunggal ini.
   const layout = computeSheetLayout(size, cols, rows, marginCm, p, orientation);
   const px = scale / 10; // px per mm
-  const count = layout.count;
+  const layoutPx = scaleSheetLayout(layout, px);
+  const count = layoutPx.count;
   const sheetW = d.widthMm * px;
   const sheetH = d.heightMm * px;
-  const gridW = layout.gridW * px;
-  const gridH = layout.gridH * px;
-  const padX = layout.marginX * px;
-  const padY = layout.marginY * px;
+  const { gridW, gridH, marginX: padX, marginY: padY } = layoutPx;
+  const cellW = size.widthMm * px;
+  const cellH = size.heightMm * px;
+  // Resolusi target drop dari POSISI pointer (sumber tunggal sheetLayout),
+  // dengan indeks sel event sebagai fallback — geometri drag ikut hitungan
+  // yang sama dengan PDF/cetak.
+  const dropTargetFromEvent = (e: React.DragEvent): number => {
+    const el = sheetRef.current;
+    if (!el) return -1;
+    const rect = el.getBoundingClientRect();
+    return sheetCellAtPoint(
+      e.clientX - rect.left - padX,
+      e.clientY - rect.top - padY,
+      cols,
+      rows,
+      cellW,
+      cellH,
+      layoutPx
+    );
+  };
 
   const photos = srcs ?? (src ? Array.from({ length: count }, () => src) : []);
   const isMulti = srcs !== undefined;
@@ -94,14 +115,15 @@ export default function A4SheetPreview({
   const labelPx = labelSizePx * (scale / fitScale);
   const sheet = (
     <div
+      ref={sheetRef}
       className="sheet"
       style={{ width: sheetW, height: sheetH, padding: `${padY}px ${padX}px` }}
     >
       <div
         className={`sheet-grid${cutLines ? " cut-lines" : ""}`}
         style={{
-          gridTemplateColumns: `repeat(${cols}, ${size.widthMm * px}px)`,
-          gridTemplateRows: `repeat(${rows}, ${size.heightMm * px}px)`,
+          gridTemplateColumns: `repeat(${cols}, ${cellW}px)`,
+          gridTemplateRows: `repeat(${rows}, ${cellH}px)`,
           gap: 0,
           width: gridW,
           height: gridH,
@@ -144,9 +166,12 @@ export default function A4SheetPreview({
                 ? (e) => {
                     e.preventDefault();
                     setDragOverIdx(null);
-                    if (dragFrom !== null && dragFrom !== i) {
-                      onDropPhoto(dragFrom, i);
-                    }
+                    if (dragFrom === null) return;
+                    // Grid rapat (gap 0): posisi & indeks sel selalu sama;
+                    // hitungan posisi jadi sumber, indeks event fallback.
+                    const target = dropTargetFromEvent(e);
+                    const dest = target >= 0 ? target : i;
+                    if (dest !== dragFrom) onDropPhoto(dragFrom, dest);
                     setDragFrom(null);
                   }
                 : undefined

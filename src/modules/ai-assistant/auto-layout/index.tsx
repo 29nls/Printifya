@@ -99,6 +99,12 @@ const clampNum = (raw: string, min: number, max: number) => {
 interface PhotoItem {
   url: string;
   name: string;
+  /**
+   * Teks Booth khusus foto ini (strip hashtag / banner) — kosong atau
+   * undefined = pakai teks default event (boothHashtag / boothBanner).
+   * Berlaku untuk semua sel yang memuat foto ini.
+   */
+  boothText?: string;
 }
 
 export default function AutoLayoutPage() {
@@ -167,19 +173,63 @@ export default function AutoLayoutPage() {
     return stored && getFrame(stored) ? stored : "";
   });
   const frame = getFrame(frameId);
+  // Bingkai Booth bertulisan (hashtag / banner) — saat aktif, tiap foto di
+  // strip bisa diberi teks sendiri (mis. nama tamu) lewat input per foto.
+  const boothTextFrameActive =
+    frame?.id === "booth-hashtag" ||
+    frame?.id === "booth-hashtag-warna" ||
+    frame?.id === "booth-banner";
   // Garis potong (sekat) antar sel — default AKTIF agar mudah dipotong.
   const [cutLines, setCutLines] = useState(saved?.cutLines ?? true);
+  // Teks kustom bingkai Booth (hashtag & banner) — tersimpan per sesi, dipakai
+  // sebagai teks bingkai bertulisan; kosongkan untuk kembali ke default.
+  const [boothHashtag, setBoothHashtag] = useState(
+    saved?.boothHashtag ?? "#SENYUM"
+  );
+  const [boothBanner, setBoothBanner] = useState(
+    saved?.boothBanner ?? "PHOTO BOOTH"
+  );
+  // Versi ter-debounce untuk reframe: mengetik tidak memicu ulang framing
+  // seluruh batch tiap karakter (reframe hanya setelah jeda 300 ms).
+  const [debouncedHashtag, setDebouncedHashtag] = useState(boothHashtag);
+  const [debouncedBanner, setDebouncedBanner] = useState(boothBanner);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedHashtag(boothHashtag), 300);
+    return () => clearTimeout(t);
+  }, [boothHashtag]);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedBanner(boothBanner), 300);
+    return () => clearTimeout(t);
+  }, [boothBanner]);
   // Versi ber-bingkai tiap foto (kunci = URL asli). Dihitung ulang saat
   // daftar foto / bingkai / ukuran sel berubah.
   const [framedMap, setFramedMap] = useState<Record<string, string>>({});
+  // Metadata pengaturan yang dipakai membangun framedMap — dipakai
+  // ensureFreshFrames untuk mendeteksi teks/bingkai basi sebelum ekspor/cetak.
+  const framedMetaRef = useRef<{
+    frameId: string;
+    hashtag: string;
+    banner: string;
+    signature: string;
+    texts: string;
+  } | null>(null);
   // Signature SET URL foto (urut-bebas): efek bingkai hanya dipicu saat foto
   // ditambah/dihapus — mengedit label atau meng-drag urutan tidak menambah
   // foto, jadi tidak perlu mem-frame ulang semuanya.
   const photosSignature = [...new Set(photos.map((p) => p.url))]
     .sort()
     .join("\u0000");
+  // Signature teks Booth per foto (urutan penting — teks milik foto tertentu).
+  const rawTextsSig = photos.map((p) => p.boothText ?? "").join("\u0000");
+  // Versi ter-debounce: mengetik teks per foto tidak memicu ulang framing
+  // seluruh batch tiap karakter (reframe hanya setelah jeda 300 ms).
+  const [debouncedTextsSig, setDebouncedTextsSig] = useState(rawTextsSig);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedTextsSig(rawTextsSig), 300);
+    return () => clearTimeout(t);
+  }, [rawTextsSig]);
 
-  // Persist pengaturan kertas, grid, label & bingkai setiap berubah.
+  // Persist pengaturan kertas, grid, label, bingkai & teks Booth setiap berubah.
   useEffect(() => {
     saveLayoutSettings({
       cols,
@@ -190,8 +240,21 @@ export default function AutoLayoutPage() {
       labelSize,
       frameId,
       cutLines,
+      boothHashtag,
+      boothBanner,
     });
-  }, [cols, rows, marginCm, paper, showLabels, labelSize, frameId, cutLines]);
+  }, [
+    cols,
+    rows,
+    marginCm,
+    paper,
+    showLabels,
+    labelSize,
+    frameId,
+    cutLines,
+    boothHashtag,
+    boothBanner,
+  ]);
 
   // Terapkan bingkai ke semua foto (blob URL → data URL ber-bingkai).
   useEffect(() => {
@@ -199,29 +262,44 @@ export default function AutoLayoutPage() {
     const run = async () => {
       if (!frame) {
         setFramedMap({});
+        framedMetaRef.current = null;
         return;
       }
       const result: Record<string, string> = {};
       for (const p of photos) {
         if (cancelled) return;
         try {
-          result[p.url] = await applyFrame(
-            p.url,
-            frame,
-            size.widthPx,
-            size.heightPx
-          );
+        result[p.url] = await applyFrame(p.url, frame, size.widthPx, size.heightPx, {
+          hashtagText: p.boothText?.trim() ? p.boothText : debouncedHashtag,
+          bannerText: p.boothText?.trim() ? p.boothText : debouncedBanner,
+        });
         } catch {
           // gagal di-frame — biarkan foto asli
         }
       }
-      if (!cancelled) setFramedMap(result);
+      if (!cancelled) {
+        setFramedMap(result);
+        framedMetaRef.current = {
+          frameId: frame.id,
+          hashtag: debouncedHashtag,
+          banner: debouncedBanner,
+          signature: photosSignature,
+          texts: debouncedTextsSig,
+        };
+      }
     };
     run();
     return () => {
       cancelled = true;
     };
-  }, [frame, photosSignature, size.id]);
+  }, [
+    frame,
+    photosSignature,
+    size.id,
+    debouncedHashtag,
+    debouncedBanner,
+    debouncedTextsSig,
+  ]);
   const [exporting, setExporting] = useState(false);
   const [printing, setPrinting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -348,6 +426,13 @@ export default function AutoLayoutPage() {
     );
   };
 
+  /** Teks Booth khusus satu foto (hashtag/banner); kosong = default event. */
+  const updateBoothText = (i: number, text: string) => {
+    setPhotos((prev) =>
+      prev.map((p, idx) => (idx === i ? { ...p, boothText: text } : p))
+    );
+  };
+
   /** Pindahkan foto dari indeks `from` ke `to` di strip (drag thumbnail). */
   const movePhoto = (from: number, to: number) => {
     if (from === to) return;
@@ -391,6 +476,56 @@ export default function AutoLayoutPage() {
     }
   };
 
+  /**
+   * Pastikan gambar ber-bingkai mencerminkan PENGATURAN TERKINI (teks Booth
+   * dan bingkai), lalu kembalikan peta URL → data URL ber-bingkai. Framing
+   * hidup memakai nilai ter-debounce; bila tombol ekspor/cetak diklik tepat
+   * setelah mengetik teks (dalam window debounce 300 ms) atau saat reframe
+   * masih berjalan, peta lama bisa basi — di sini dibangun ulang dengan nilai
+   * terkini agar PDF & cetak selalu memuat teks kustom yang sedang dilihat.
+   */
+  const ensureFreshFrames = async (): Promise<Record<string, string>> => {
+    if (!frame) return {};
+    const sig = photosSignature;
+    const textsSig = rawTextsSig;
+    const meta = framedMetaRef.current;
+    const fresh =
+      meta !== null &&
+      meta.frameId === frame.id &&
+      meta.hashtag === boothHashtag &&
+      meta.banner === boothBanner &&
+      meta.signature === sig &&
+      meta.texts === textsSig &&
+      photos.every((p) => framedMap[p.url]);
+    if (fresh) return framedMap;
+    const result: Record<string, string> = {};
+    for (const p of photos) {
+      try {
+        result[p.url] = await applyFrame(
+          p.url,
+          frame,
+          size.widthPx,
+          size.heightPx,
+          {
+            hashtagText: p.boothText?.trim() ? p.boothText : boothHashtag,
+            bannerText: p.boothText?.trim() ? p.boothText : boothBanner,
+          }
+        );
+      } catch {
+        // gagal di-frame — biarkan foto asli
+      }
+    }
+    setFramedMap(result);
+    framedMetaRef.current = {
+      frameId: frame.id,
+      hashtag: boothHashtag,
+      banner: boothBanner,
+      signature: sig,
+      texts: textsSig,
+    };
+    return result;
+  };
+
   /** Reset preferensi tersimpan ke default; state ikut dipulihkan. */
   const handleResetPrefs = () => {
     clearLayoutSettings();
@@ -401,6 +536,8 @@ export default function AutoLayoutPage() {
     setLabelSize("medium");
     setFrameId("");
     setCutLines(true);
+    setBoothHashtag("#SENYUM");
+    setBoothBanner("PHOTO BOOTH");
   };
 
   const handleExport = async () => {
@@ -408,7 +545,8 @@ export default function AutoLayoutPage() {
     setError("");
     setExporting(true);
     try {
-      await exportLayoutPdf(size, photos.map((p) => framedOf(p.url)), {
+      const frames = await ensureFreshFrames();
+      await exportLayoutPdf(size, photos.map((p) => frames[p.url] ?? p.url), {
         cols,
         rows,
         marginCm,
@@ -430,14 +568,15 @@ export default function AutoLayoutPage() {
    * halaman berisi foto berurutan; bila melebihi satu halaman, dibuat
    * halaman tambahan di dokumen cetak.
    */
-  const handlePrint = () => {
+  const handlePrint = async () => {
     if (!canExport || exporting || printing) return;
     setError("");
     setPrinting(true);
     try {
       // Satu gambar per sel (berurutan); mode siklus memakai isian halaman ini.
       const items = multiPage ? photos : pageItems;
-      const srcs = items.map((p) => framedOf(p.url));
+      const frames = await ensureFreshFrames();
+      const srcs = items.map((p) => frames[p.url] ?? p.url);
       const html = buildHtmlSheet(srcs, size, {
         cols,
         rows,
@@ -589,6 +728,20 @@ export default function AutoLayoutPage() {
                     title="Nama / keterangan untuk sel ini"
                     onChange={(e) => updateName(i, e.target.value)}
                   />
+                  {boothTextFrameActive && (
+                    <input
+                      className="photo-booth-text-input"
+                      value={p.boothText ?? ""}
+                      maxLength={30}
+                      placeholder={
+                        frame.id === "booth-banner"
+                          ? boothBanner
+                          : boothHashtag
+                      }
+                      title="Teks Booth khusus foto ini — kosongkan untuk memakai teks default event"
+                      onChange={(e) => updateBoothText(i, e.target.value)}
+                    />
+                  )}
                   <button
                     type="button"
                     className="photo-forward"
@@ -605,7 +758,9 @@ export default function AutoLayoutPage() {
               lembar bila diaktifkan). Klik 🪪 pada thumbnail untuk meneruskan
               foto itu langsung ke alur crop Pas Foto 3x4. Seret thumbnail untuk
               mengatur ulang urutan foto — lembar, label, PDF, dan cetak
-              mengikuti urutan baru.
+              mengikuti urutan baru.{" "}
+              {boothTextFrameActive &&
+                "Saat bingkai Booth bertulisan aktif, tiap foto bisa diberi teks sendiri (mis. nama tamu) — kosongkan untuk memakai teks default event."}
             </p>
           </>
         )}
@@ -686,6 +841,40 @@ export default function AutoLayoutPage() {
                 Tampilkan nama di lembar
               </label>
               <FramePicker value={frameId} onChange={setFrameId} />
+              {(frame?.id === "booth-hashtag" ||
+                frame?.id === "booth-hashtag-warna") && (
+                <label>
+                  Teks hashtag (Booth)
+                  <input
+                    type="text"
+                    maxLength={30}
+                    value={boothHashtag}
+                    placeholder="#SENYUM"
+                    onChange={(e) => setBoothHashtag(e.target.value)}
+                  />
+                </label>
+              )}
+              {frame?.id === "booth-banner" && (
+                <label>
+                  Teks banner (Booth)
+                  <input
+                    type="text"
+                    maxLength={30}
+                    value={boothBanner}
+                    placeholder="PHOTO BOOTH"
+                    onChange={(e) => setBoothBanner(e.target.value)}
+                  />
+                </label>
+              )}
+              {boothTextFrameActive && (
+                <p className="hint booth-text-hint">
+                  💡 Teks default tersimpan dan tampil di pratinjau, PDF, dan
+                  cetak; kosongkan untuk kembali ke teks default. Tiap foto di
+                  strip bisa diberi teks sendiri (mis. nama tamu) lewat input di
+                  bawah thumbnail — kosongkan input foto untuk memakai teks
+                  default event.
+                </p>
+              )}
               <label className="label-toggle">
                 <input
                   type="checkbox"

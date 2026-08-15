@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   decideFormatToggle,
+  sortFormatStats,
   type FormatSession,
   type FormatToggleItem,
 } from "./formatCompare";
@@ -89,5 +90,46 @@ describe("decideFormatToggle — cache & guard per-id", () => {
 
     // Buka ulang dengan hasil tersimpan → cached.
     expect(decideFormatToggle(done("a"), f)).toEqual({ action: "cached" });
+  });
+});
+
+describe("sortFormatStats — kualitas terbaik ke terburuk", () => {
+  const s = (
+    format: FormatStat["format"],
+    size: number,
+    psnrDb: number | null
+  ): FormatStat => ({ format, size, psnrDb });
+
+  it("∞ dB (lossless) paling atas, lalu PSNR menurun, gagal decode (null) paling bawah", () => {
+    const input = [
+      s("jpg", 1200, 30.5),
+      s("webp", 800, 35.2),
+      s("png", 5000, null),
+      s("png", 900, Infinity),
+    ];
+    expect(sortFormatStats(input).map((x) => [x.format, x.psnrDb])).toEqual([
+      ["png", Infinity],
+      ["webp", 35.2],
+      ["jpg", 30.5],
+      ["png", null],
+    ]);
+  });
+
+  it("tiebreaker: PSNR sama → ukuran file lebih kecil lebih dulu", () => {
+    const input = [s("jpg", 2000, 33.0), s("webp", 700, 33.0)];
+    expect(sortFormatStats(input).map((x) => x.format)).toEqual(["webp", "jpg"]);
+  });
+
+  it("null vs null (gagal decode) diurutkan dengan tiebreaker ukuran, tanpa error", () => {
+    const input = [s("jpg", 5, null), s("webp", 0, null)];
+    expect(sortFormatStats(input).map((x) => x.format)).toEqual(["webp", "jpg"]);
+  });
+
+  it("tidak mengubah array asli (cache item) dan mengembalikan salinan", () => {
+    const input = [s("png", 900, Infinity), s("jpg", 1200, 30.5)];
+    const copy = [...input];
+    const out = sortFormatStats(input);
+    expect(input).toEqual(copy);
+    expect(out).not.toBe(input);
   });
 });
