@@ -1,5 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import PasFotoWorkflow from "../shared/PasFotoWorkflow";
+import ResetPreferencesButton from "../../shared/ResetPreferencesButton";
+import {
+  clearCustomSize,
+  loadCustomSize,
+  saveCustomSize,
+} from "./sizeStorage";
 import type { PasFotoSize } from "../shared/pasFotoSize";
 import "./style.css";
 
@@ -13,9 +19,22 @@ const clampNum = (raw: string, min: number, max: number) => {
 const fmtCm = (n: number) => n.toFixed(2).replace(/\.?0+$/, "");
 
 export default function CustomSizePage() {
-  const [widthCm, setWidthCm] = useState(3);
-  const [heightCm, setHeightCm] = useState(4);
-  const [dpi, setDpi] = useState(300);
+  // Ukuran kustom — default dari localStorage, disimpan ulang setiap berubah.
+  const [widthCm, setWidthCm] = useState(() => loadCustomSize().widthCm);
+  const [heightCm, setHeightCm] = useState(() => loadCustomSize().heightCm);
+  const [dpi, setDpi] = useState(() => loadCustomSize().dpi);
+
+  useEffect(() => {
+    saveCustomSize({ widthCm, heightCm, dpi });
+  }, [widthCm, heightCm, dpi]);
+
+  /** Reset ukuran kustom tersimpan ke default. */
+  const handleResetPrefs = () => {
+    clearCustomSize();
+    setWidthCm(3);
+    setHeightCm(4);
+    setDpi(300);
+  };
 
   const size: PasFotoSize = useMemo(
     () => ({
@@ -90,6 +109,12 @@ export default function CustomSizePage() {
           </strong>{" "}
           @ {dpi} DPI — ukuran cetak {size.label}
         </p>
+        <div className="custom-reset">
+          <ResetPreferencesButton
+            title="Hapus lebar/tinggi/DPI tersimpan modul ini"
+            onReset={handleResetPrefs}
+          />
+        </div>
       </section>
 
       <PasFotoWorkflow size={size} showHeader={false} />

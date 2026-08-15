@@ -17,6 +17,12 @@ import {
   clearPendingLayoutPhotos,
   peekPendingLayoutPhotos,
 } from "../../shared/autoLayoutBridge";
+import {
+  clearLayoutSettings,
+  loadLayoutSettings,
+  saveLayoutSettings,
+} from "./settingsStorage";
+import ResetPreferencesButton from "../../shared/ResetPreferencesButton";
 import "../../photo-studio/shared/style.css";
 import "./style.css";
 
@@ -102,12 +108,36 @@ export default function AutoLayoutPage() {
   }, []);
   const [error, setError] = useState("");
   const [dragOver, setDragOver] = useState(false);
-  const [cols, setCols] = useState(maxCols(PRESETS[1], DEFAULT_MARGIN_CM));
-  const [rows, setRows] = useState(maxRows(PRESETS[1], DEFAULT_MARGIN_CM));
-  const [marginCm, setMarginCm] = useState(DEFAULT_MARGIN_CM);
+  // Pengaturan grid & label — default dari localStorage, di-clamp ke preset aktif
+  // (batas maks kolom/baris berbeda per ukuran pas foto).
+  const [saved] = useState(() => loadLayoutSettings());
+  const [cols, setCols] = useState(() =>
+    clampInt(
+      String(saved?.cols ?? maxCols(PRESETS[1], DEFAULT_MARGIN_CM)),
+      1,
+      maxCols(PRESETS[1])
+    )
+  );
+  const [rows, setRows] = useState(() =>
+    clampInt(
+      String(saved?.rows ?? maxRows(PRESETS[1], DEFAULT_MARGIN_CM)),
+      1,
+      maxRows(PRESETS[1])
+    )
+  );
+  const [marginCm, setMarginCm] = useState(() =>
+    clampNum(String(saved?.marginCm ?? DEFAULT_MARGIN_CM), 0.2, 1.5)
+  );
   const [page, setPage] = useState(0);
-  const [showLabels, setShowLabels] = useState(false);
-  const [labelSize, setLabelSize] = useState<LabelSizeValue>("medium");
+  const [showLabels, setShowLabels] = useState(saved?.showLabels ?? false);
+  const [labelSize, setLabelSize] = useState<LabelSizeValue>(
+    (saved?.labelSize as LabelSizeValue) ?? "medium"
+  );
+
+  // Persist pengaturan grid & label setiap berubah.
+  useEffect(() => {
+    saveLayoutSettings({ cols, rows, marginCm, showLabels, labelSize });
+  }, [cols, rows, marginCm, showLabels, labelSize]);
   const [exporting, setExporting] = useState(false);
   const [printing, setPrinting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -221,6 +251,16 @@ export default function AutoLayoutPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Gagal meneruskan foto.");
     }
+  };
+
+  /** Reset preferensi tersimpan ke default; state ikut dipulihkan. */
+  const handleResetPrefs = () => {
+    clearLayoutSettings();
+    setCols(maxCols(size, DEFAULT_MARGIN_CM));
+    setRows(maxRows(size, DEFAULT_MARGIN_CM));
+    setMarginCm(DEFAULT_MARGIN_CM);
+    setShowLabels(false);
+    setLabelSize("medium");
   };
 
   const handleExport = async () => {
@@ -481,6 +521,10 @@ export default function AutoLayoutPage() {
               >
                 {exporting ? "Menyiapkan PDF…" : "⬇️ Ekspor PDF A4"}
               </button>
+              <ResetPreferencesButton
+                title="Hapus pengaturan grid & label tersimpan modul ini"
+                onReset={handleResetPrefs}
+              />
             </div>
 
             {!canExport && (

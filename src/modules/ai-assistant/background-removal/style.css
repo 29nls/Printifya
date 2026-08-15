@@ -75,6 +75,45 @@
   background-position: 0 0, 4px 4px;
 }
 
+/* ---------- Opsi segmen (pola rembg) ---------- */
+
+.seg-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.seg-label {
+  margin-bottom: 0;
+  margin-right: 6px;
+}
+
+.seg-erode {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.seg-erode input[type="number"] {
+  width: 70px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--surface);
+}
+
+.seg-erode input[type="number"]:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
+}
+
 /* ---------- Status proses ---------- */
 
 .processing-row {

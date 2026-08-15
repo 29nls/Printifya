@@ -5,6 +5,12 @@ import CropperEditor from "../../photo-studio/shared/CropperEditor";
 import { setPendingPasFoto } from "../../shared/pasFotoBridge";
 import { setPendingLayoutPhoto } from "../../shared/autoLayoutBridge";
 import { autoCropFace } from "./autocrop";
+import {
+  clearFacePercent,
+  loadFacePercent,
+  saveFacePercent,
+} from "./optionsStorage";
+import ResetPreferencesButton from "../../shared/ResetPreferencesButton";
 import "../../photo-studio/shared/style.css";
 
 /** Rasio output pas foto yang didukung Auto Crop Face. */
@@ -69,8 +75,12 @@ export default function AutoCropFacePage() {
   const [fileName, setFileName] = useState("");
   const [error, setError] = useState("");
   const [dragOver, setDragOver] = useState(false);
-  /** Proporsi wajah dalam tinggi hasil (zoom), default 50 — sama seperti autocrop. */
-  const [facePercent, setFacePercent] = useState(50);
+  /** Proporsi wajah dalam tinggi hasil (zoom), default 50 — sama seperti autocrop; tersimpan di localStorage. */
+  const [facePercent, setFacePercent] = useState(loadFacePercent);
+
+  useEffect(() => {
+    saveFacePercent(facePercent);
+  }, [facePercent]);
   /** Awalan nama default saat hasil dikirim ke Auto Layout (label lembar). */
   const [layoutPrefix, setLayoutPrefix] = useState("auto-");
   const [cropping, setCropping] = useState(false);
@@ -149,6 +159,13 @@ export default function AutoCropFacePage() {
   const changeFacePercent = (percent: number) => {
     setFacePercent(percent);
     if (originalUrl) void runAuto(originalUrl, size, percent);
+  };
+
+  /** Reset preferensi tersimpan ke default; state ikut dipulihkan. */
+  const handleResetPrefs = () => {
+    clearFacePercent();
+    setFacePercent(50);
+    if (originalUrl) void runAuto(originalUrl, size, 50);
   };
 
   const download = () => {
@@ -359,6 +376,10 @@ export default function AutoCropFacePage() {
                 >
                   ✨ Auto Crop Ulang
                 </button>
+                <ResetPreferencesButton
+                  title="Hapus zoom (proporsi wajah) tersimpan modul ini"
+                  onReset={handleResetPrefs}
+                />
               </div>
               <p className="hint">
                 Nilai 50% = wajah mengisi separuh tinggi hasil (default{" "}

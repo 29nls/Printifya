@@ -4,24 +4,45 @@
  * klasifikasi warna kulit dipakai untuk menghentikan penyebaran latar
  * (kulit selalu dianggap bagian subjek).
  *
+ * Perilaku meniru rembg (https://github.com/danielgatis/rembg) sejauh bisa
+ * tanpa jaringan saraf:
+ * - Segmen subjek → mask alpha (rembg `remove`),
+ * - `--post-process-mask` → opening morfologi (erode → dilate 3×3) untuk
+ *   membersihkan bintik & menyambung tepi mask,
+ * - `-a / --alpha-matting` + `--alpha-matting-erode-size` (default 10) →
+ *   mask subjek di-erosi dulu sebelum feathering, memberi tepi yang lebih
+ *   halus pada band transisi,
+ * - `-om / --only-mask` → kanvas mask grayscale resolusi penuh ikut
+ *   dikembalikan untuk diekspor (putih = subjek),
+ * - `--bgcolor` → penggantian latar dengan warna polos via
+ *   {@link applyBackgroundColor}.
+ *
  * Cara kerja:
  * 1. Gambar diskalakan kecil (maks 700 px) untuk kecepatan.
  * 2. Warna latar disampling dari piksel tepi (non-kulit), dikuantisasi
  *    menjadi palet kecil (maks 5 warna dominan).
  * 3. Flood fill dari seluruh tepi: piksel yang terhubung, bukan kulit, dan
  *    warnanya dekat dengan palet latar diklaim sebagai latar.
- * 4. Mask latar diskalakan naik ke resolusi asli dengan smoothing, sehingga
- *    tepi subjek menjadi lembut (feathering) tanpa filter tambahan.
- *
- * Paling akurat untuk latar polos (putih/biru/merah — standar pas foto).
- * Bila latar rumit atau baju subjek sewarna latar, hasil bisa kurang sempurna.
+ * 4. Mask subjek di-post-proses / di-erosi sesuai opsi, lalu diskalakan naik
+ *    ke resolusi asli dengan smoothing (feathering) untuk tepi lembut.
  */
 
 import { isSkinLike } from "../../photo-studio/shared/faceDetect";
 
+export interface RemoveBgOptions {
+  /** Opening morfologi pada mask (padanan rembg `--post-process-mask`). */
+  postProcess?: boolean;
+  /** Alpha matting: erosi mask sebelum feathering (padanan rembg `-a`). */
+  alphaMatting?: boolean;
+  /** Ukuran erosi mask dalam px skala pemrosesan; rembg default 10. */
+  erodeSize?: number;
+}
+
 export interface BgProcessResult {
   /** Kanvas hasil dengan latar transparan, ukuran penuh gambar sumber. */
   canvas: HTMLCanvasElement;
+  /** Mask grayscale resolusi penuh (putih = subjek) untuk ekspor mask (-om). */
+  mask: HTMLCanvasElement;
   /** Rasio piksel yang dipertahankan sebagai subjek (0..1). */
   foregroundRatio: number;
 }
@@ -141,18 +162,105 @@ function floodFillBackground(
   return bg;
 }
 
+/** Erosi mask biner (1 = subjek) dengan kernel 3×3, `iterations` kali. */
+function erodeMask(
+  mask: Uint8Array,
+  w: number,
+  h: number,
+  iterations: number
+): Uint8Array {
+  let m: Uint8Array = mask;
+  for (let it = 0; it < iterations; it++) {
+    const out = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const p = y * w + x;
+        if (!m[p]) continue;
+        let ok = true;
+        for (let dy = -1; dy <= 1 && ok; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= w || ny >= h) {
+              ok = false;
+              break;
+            }
+            if (!m[ny * w + nx]) {
+              ok = false;
+              break;
+            }
+          }
+        }
+        if (ok) out[p] = 1;
+      }
+    }
+    m = out;
+  }
+  return m;
+}
+
+/** Dilatasi mask biner (1 = subjek) dengan kernel 3×3, `iterations` kali. */
+function dilateMask(
+  mask: Uint8Array,
+  w: number,
+  h: number,
+  iterations: number
+): Uint8Array {
+  let m: Uint8Array = mask;
+  for (let it = 0; it < iterations; it++) {
+    const out = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const p = y * w + x;
+        if (m[p]) {
+          out[p] = 1;
+          continue;
+        }
+        for (let dy = -1; dy <= 1 && !out[p]; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx >= 0 && ny >= 0 && nx < w && ny < h && m[ny * w + nx]) {
+              out[p] = 1;
+              break;
+            }
+          }
+        }
+      }
+    }
+    m = out;
+  }
+  return m;
+}
+
+/** Opening morfologi (erode → dilate) — padanan rembg `post_process_mask`. */
+function postProcessMask(
+  mask: Uint8Array,
+  w: number,
+  h: number
+): Uint8Array {
+  return dilateMask(erodeMask(mask, w, h, 1), w, h, 1);
+}
+
 /**
- * Hapus latar belakang. Mengembalikan kanvas transparan berukuran penuh.
- * Untuk mengganti latar dengan warna polos, pakai {@link applyBackgroundColor}.
+ * Hapus latar belakang. Mengembalikan kanvas transparan berukuran penuh,
+ * mask grayscale (putih = subjek), dan rasio subjek. Opsi meniru rembg:
+ * `postProcess` (--post-process-mask), `alphaMatting` + `erodeSize`
+ * (-a / --alpha-matting-erode-size, default 10).
  */
 export function removeBackground(
-  source: HTMLImageElement | HTMLCanvasElement
+  source: HTMLImageElement | HTMLCanvasElement,
+  opts: RemoveBgOptions = {}
 ): BgProcessResult {
   const srcW =
     source instanceof HTMLImageElement ? source.naturalWidth : source.width;
   const srcH =
     source instanceof HTMLImageElement ? source.naturalHeight : source.height;
   if (!srcW || !srcH) throw new Error("Gambar kosong.");
+
+  const postProcess = opts.postProcess ?? false;
+  const alphaMatting = opts.alphaMatting ?? false;
+  const erodeSize = Math.max(0, Math.round(opts.erodeSize ?? 10));
 
   const MAX = 700;
   const scale = Math.min(1, MAX / Math.max(srcW, srcH));
@@ -175,27 +283,44 @@ export function removeBackground(
   const palette = buildPalette(data, w, h, skin);
   const bg = floodFillBackground(data, w, h, skin, palette);
 
-  // Mask subjek (putih = subjek) pada skala kecil.
-  const maskCanvas = document.createElement("canvas");
-  maskCanvas.width = w;
-  maskCanvas.height = h;
-  const mctx = maskCanvas.getContext("2d");
+  // Mask subjek (1 = subjek) pada skala kecil.
+  let fg: Uint8Array = new Uint8Array(w * h);
+  for (let p = 0; p < w * h; p++) fg[p] = bg[p] ? 0 : 1;
+
+  // Post-proses mask (rembg --post-process-mask): buang bintik, rapi tepi.
+  if (postProcess) fg = postProcessMask(fg, w, h);
+
+  // Alpha matting (rembg -a): erosi mask sebelum feathering → tepi lebih halus.
+  if (alphaMatting && erodeSize > 0) fg = erodeMask(fg, w, h, erodeSize);
+
+  let fgCount = 0;
+  const maskSmall = document.createElement("canvas");
+  maskSmall.width = w;
+  maskSmall.height = h;
+  const mctx = maskSmall.getContext("2d");
   if (!mctx) throw new Error("Canvas tidak didukung browser ini.");
   const maskData = mctx.createImageData(w, h);
-  let fgCount = 0;
   for (let p = 0; p < w * h; p++) {
-    const v = bg[p] ? 0 : 255;
-    if (!bg[p]) fgCount++;
+    const v = fg[p] ? 255 : 0;
+    if (fg[p]) fgCount++;
     maskData.data[p * 4] = v;
     maskData.data[p * 4 + 1] = v;
     maskData.data[p * 4 + 2] = v;
-    // Alpha = mask (destination-in memakai alpha sumber, bukan RGB).
     maskData.data[p * 4 + 3] = v;
   }
   mctx.putImageData(maskData, 0, 0);
 
-  // Hasil ukuran penuh: gambar asli dikomposit dengan alpha dari mask yang
-  // diskalakan naik (smoothing memberi tepi lembut secara gratis).
+  // Mask resolusi penuh: diskalakan naik dengan smoothing (feathering).
+  const mask = document.createElement("canvas");
+  mask.width = srcW;
+  mask.height = srcH;
+  const mfctx = mask.getContext("2d");
+  if (!mfctx) throw new Error("Canvas tidak didukung browser ini.");
+  mfctx.imageSmoothingEnabled = true;
+  mfctx.imageSmoothingQuality = "high";
+  mfctx.drawImage(maskSmall, 0, 0, srcW, srcH);
+
+  // Hasil ukuran penuh: gambar asli dikomposit dengan alpha dari mask.
   const full = document.createElement("canvas");
   full.width = srcW;
   full.height = srcH;
@@ -203,18 +328,17 @@ export function removeBackground(
   if (!fctx) throw new Error("Canvas tidak didukung browser ini.");
   fctx.drawImage(source, 0, 0, srcW, srcH);
   fctx.globalCompositeOperation = "destination-in";
-  fctx.imageSmoothingEnabled = true;
-  fctx.imageSmoothingQuality = "high";
-  fctx.drawImage(maskCanvas, 0, 0, srcW, srcH);
+  fctx.drawImage(mask, 0, 0);
   fctx.globalCompositeOperation = "source-over";
 
   return {
     canvas: full,
+    mask,
     foregroundRatio: fgCount / (w * h),
   };
 }
 
-/** Ganti latar transparan dengan warna polos (hex, mis. "#ffffff"). */
+/** Ganti latar transparan dengan warna polos (hex, mis. "#ffffff") — rembg --bgcolor. */
 export function applyBackgroundColor(
   result: HTMLCanvasElement,
   hex: string

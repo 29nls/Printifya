@@ -9,6 +9,7 @@ import {
   type LetterFields,
 } from "./letterHtml";
 import {
+  clearAllStorage,
   clearDraft,
   loadArchive,
   loadDraft,
@@ -16,6 +17,7 @@ import {
   saveDraft,
   type ArchiveEntry,
 } from "./storage";
+import ResetPreferencesButton from "../../shared/ResetPreferencesButton";
 import "../../photo-studio/shared/style.css";
 import "./style.css";
 
@@ -183,6 +185,27 @@ export default function TemplateSuratPage() {
     } finally {
       setPrinting(false);
     }
+  };
+
+  /** Reset semua data tersimpan (draf & riwayat) + form ke default. */
+  const handleResetPrefs = () => {
+    clearAllStorage();
+    setArchive([]);
+    setInstansi("PT Printifya Nusantara");
+    setAlamat("Jl. Merdeka No. 45, Jakarta Pusat 10110");
+    setLogo(null);
+    setKode("PRINTIFYA");
+    setSeq(1);
+    setTanggal(todayIso());
+    setLampiran("1 berkas");
+    setPerihal("");
+    setKepada("");
+    setIsi("");
+    setPenutup(DEFAULT_PENUTUP);
+    setNama("");
+    setJabatan("");
+    setError("");
+    setInfo("Preferensi & data tersimpan modul ini direset.");
   };
 
   const newLetter = () => {
@@ -382,9 +405,15 @@ export default function TemplateSuratPage() {
           <section className="panel">
             <div className="archive-head">
               <h2>Riwayat Surat</h2>
-              <button type="button" className="btn" onClick={saveToArchive}>
-                💾 Simpan ke Riwayat
-              </button>
+              <div className="archive-actions">
+                <ResetPreferencesButton
+                  title="Hapus semua data tersimpan modul ini (draf & riwayat surat)"
+                  onReset={handleResetPrefs}
+                />
+                <button type="button" className="btn" onClick={saveToArchive}>
+                  💾 Simpan ke Riwayat
+                </button>
+              </div>
             </div>
             {info && <p className="archive-info">{info}</p>}
             {archive.length === 0 ? (

@@ -114,6 +114,7 @@ export default function VisaPhotoPage() {
     <PasFotoWorkflow
       size={VISA_PRESETS[0]}
       presets={VISA_PRESETS}
+      sizeStorageKey="printifya.visa-photo.size"
       header={{
         title: "Visa Photo",
         description:

@@ -53,3 +53,13 @@ export function loadArchive(): ArchiveEntry[] {
 export function saveArchive(entries: ArchiveEntry[]): void {
   write(ARCHIVE_KEY, entries.slice(0, MAX_ARCHIVE));
 }
+
+/** Hapus semua kunci localStorage milik modul ini (draf + riwayat). */
+export function clearAllStorage(): void {
+  try {
+    localStorage.removeItem(DRAFT_KEY);
+    localStorage.removeItem(ARCHIVE_KEY);
+  } catch {
+    // abaikan
+  }
+}

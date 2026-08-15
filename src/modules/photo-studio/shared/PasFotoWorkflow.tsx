@@ -5,6 +5,12 @@ import {
   setPendingLayoutPhoto,
   setPendingLayoutPhotos,
 } from "../../shared/autoLayoutBridge";
+import ResetPreferencesButton from "../../shared/ResetPreferencesButton";
+import {
+  clearStoredSizeId,
+  readStoredSizeId,
+  writeStoredSizeId,
+} from "./sizeStorage";
 import type { PasFotoSize } from "./pasFotoSize";
 import CropperEditor from "./CropperEditor";
 import A4SheetPreview from "./A4SheetPreview";
@@ -32,6 +38,11 @@ interface PasFotoWorkflowProps {
   showHeader?: boolean;
   /** Gambar awal (data URL) yang langsung masuk ke langkah crop, mis. hasil modul lain. */
   initialImage?: string;
+  /**
+   * Bila diisi, preset aktif (selectSize) dipersist ke localStorage dan muncul
+   * tombol "Setel Ulang Preferensi" di pemilih preset (mis. negara visa).
+   */
+  sizeStorageKey?: string;
 }
 
 const clampInt = (raw: string, min: number, max: number) => {
@@ -61,10 +72,26 @@ export default function PasFotoWorkflow({
   header,
   showHeader = true,
   initialImage,
+  sizeStorageKey,
 }: PasFotoWorkflowProps) {
   const DEFAULT_MARGIN_CM = 0.5;
 
-  const [activeSize, setActiveSize] = useState<PasFotoSize>(size);
+  // Preset aktif: pulihkan dari localStorage bila sizeStorageKey diisi.
+  const [activeSize, setActiveSize] = useState<PasFotoSize>(() => {
+    if (sizeStorageKey && presets && presets.length > 0) {
+      const savedId = readStoredSizeId(sizeStorageKey);
+      if (savedId) {
+        const found = presets.find((p) => p.id === savedId);
+        if (found) return found;
+      }
+    }
+    return size;
+  });
+
+  // Persist preset aktif (mis. negara visa) setiap berubah.
+  useEffect(() => {
+    if (sizeStorageKey) writeStoredSizeId(sizeStorageKey, activeSize.id);
+  }, [activeSize, sizeStorageKey]);
   // Batas input (maks di margin minimal) vs default grid (maks di margin default).
   const maxC = maxCols(activeSize);
   const maxR = maxRows(activeSize);
@@ -129,7 +156,13 @@ export default function PasFotoWorkflow({
 
   // Sinkronkan ukuran aktif bila prop `size` berubah (mode ukuran kustom).
   // Foto yang sudah dicrop tidak valid lagi, jadi ulangi crop foto asli.
+  // Hanya sinkron saat id prop BENAR-BENAR berubah (bukan mount pertama /
+  // double-mount StrictMode) agar preset yang dipulihkan dari storage (visa)
+  // tidak ditimpa oleh prop `size` (preset pertama).
+  const prevSizeId = useRef(size.id);
   useEffect(() => {
+    if (prevSizeId.current === size.id) return;
+    prevSizeId.current = size.id;
     if (size.id === activeSize.id) return;
     setActiveSize(size);
     setCroppedUrl(null);
@@ -188,6 +221,13 @@ export default function PasFotoWorkflow({
     setRows(maxRows(s, DEFAULT_MARGIN_CM));
     setError("");
     setStep(originalUrl ? "edit" : "upload");
+  };
+
+  /** Reset preset tersimpan ke yang pertama; state ikut dipulihkan. */
+  const handleResetPrefs = () => {
+    if (!sizeStorageKey) return;
+    clearStoredSizeId(sizeStorageKey);
+    if (presets && presets.length > 0) selectSize(presets[0]);
   };
 
   /** Hapus satu orang dari daftar; yang tampil menjadi orang terakhir yang tersisa. */
@@ -342,6 +382,14 @@ export default function PasFotoWorkflow({
               </button>
             ))}
           </div>
+          {sizeStorageKey && (
+            <div className="preset-reset">
+              <ResetPreferencesButton
+                title="Hapus preset ukuran tersimpan modul ini"
+                onReset={handleResetPrefs}
+              />
+            </div>
+          )}
           {activeSize.note && <p className="preset-note">ℹ️ {activeSize.note}</p>}
         </div>
       )}
