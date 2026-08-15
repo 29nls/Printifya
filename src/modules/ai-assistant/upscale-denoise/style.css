@@ -1,0 +1,293 @@
+/* ---------- Upscale & Denoise (Waifu2x-style) ---------- */
+
+.w2x-layout {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  gap: 20px;
+  align-items: start;
+}
+
+.w2x-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.w2x-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  flex-wrap: wrap;
+}
+
+.w2x-thumb {
+  width: 52px;
+  height: 52px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  flex-shrink: 0;
+}
+
+.w2x-info {
+  flex: 1;
+  min-width: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.w2x-info span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.w2x-info em {
+  color: var(--error, #dc2626);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.w2x-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.w2x-menunggu {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.w2x-memproses {
+  background: #dbeafe;
+  color: #1e40af;
+  animation: w2x-pulse 1s ease-in-out infinite;
+}
+
+.w2x-selesai {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.w2x-gagal {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+@keyframes w2x-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.w2x-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Tabel perbandingan format (ukuran + PSNR). */
+.w2x-formats {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.w2x-formats table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.w2x-formats th,
+.w2x-formats td {
+  text-align: left;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.w2x-formats th {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.w2x-formats tr:last-child td {
+  border-bottom: 0;
+}
+
+.w2x-formats .w2x-fmt-used td {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.w2x-formats .hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+
+.w2x-progress {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.w2x-progress-bar {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.w2x-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.3s;
+}
+
+.w2x-progress span {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.w2x-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.preset-picker {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.chip {
+  padding: 5px 12px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.w2x-range {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.w2x-range input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.w2x-range span {
+  min-width: 64px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.w2x-run {
+  width: 100%;
+  margin-top: 4px;
+}
+
+/* Baris preferensi (awalan label + tombol reset). */
+.w2x-prefs-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.w2x-compare {
+  grid-column: 1 / -1;
+}
+
+.w2x-compare-wrap {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  user-select: none;
+}
+
+.w2x-compare-img {
+  width: 100%;
+  max-height: 70vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+}
+
+.w2x-compare-img img {
+  max-width: 100%;
+  max-height: 70vh;
+  display: block;
+}
+
+.w2x-compare-overlay {
+  position: absolute;
+  inset: 0;
+}
+
+.w2x-compare-overlay img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.w2x-compare-slider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+@media (max-width: 900px) {
+  .w2x-layout {
+    grid-template-columns: 1fr;
+  }
+  .w2x-compare {
+    grid-column: auto;
+  }
+}

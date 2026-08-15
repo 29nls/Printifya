@@ -7,6 +7,12 @@ import {
   type EnhanceParams,
 } from "./enhance";
 import { setPendingLayoutPhoto } from "../../shared/autoLayoutBridge";
+import {
+  clearEnhanceOptions,
+  loadLayoutPrefix,
+  saveLayoutPrefix,
+} from "./optionsStorage";
+import ResetPreferencesButton from "../../shared/ResetPreferencesButton";
 import "../../photo-studio/shared/style.css";
 import "./style.css";
 
@@ -34,10 +40,16 @@ export default function EnhancePhotoPage() {
   const [preview, setPreview] = useState<HTMLCanvasElement | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
   const [autoApplied, setAutoApplied] = useState(false);
-  /** Awalan nama default saat hasil dikirim ke Auto Layout (label lembar). */
-  const [layoutPrefix, setLayoutPrefix] = useState("enhanced-");
+  /** Awalan nama default saat hasil dikirim ke Auto Layout (label lembar).
+   *  Default dari localStorage, disimpan ulang setiap berubah (pola
+   *  optionsStorage.ts di Auto Crop Face). */
+  const [layoutPrefix, setLayoutPrefix] = useState(loadLayoutPrefix);
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    saveLayoutPrefix(layoutPrefix);
+  }, [layoutPrefix]);
 
   // Pratinjau live dengan debounce singkat saat slider digeser.
   useEffect(() => {
@@ -102,6 +114,12 @@ export default function EnhancePhotoPage() {
   const reset = () => {
     setParams(NEUTRAL_PARAMS);
     setAutoApplied(false);
+  };
+
+  /** Reset preferensi tersimpan ke default; state ikut dipulihkan. */
+  const handleResetPrefs = () => {
+    clearEnhanceOptions();
+    setLayoutPrefix("enhanced-");
   };
 
   const download = () => {
@@ -279,15 +297,21 @@ export default function EnhancePhotoPage() {
               </figure>
             </div>
 
-            <label className="layout-prefix">
-              🧩 Awalan label di lembar Auto Layout
-              <input
-                type="text"
-                value={layoutPrefix}
-                placeholder="mis. enhanced-"
-                onChange={(e) => setLayoutPrefix(e.target.value)}
+            <div className="prefs-row">
+              <label className="layout-prefix">
+                🧩 Awalan label di lembar Auto Layout
+                <input
+                  type="text"
+                  value={layoutPrefix}
+                  placeholder="mis. enhanced-"
+                  onChange={(e) => setLayoutPrefix(e.target.value)}
+                />
+              </label>
+              <ResetPreferencesButton
+                title="Hapus awalan label tersimpan modul ini"
+                onReset={handleResetPrefs}
               />
-            </label>
+            </div>
 
             <div className="result-actions">
               <button type="button" className="btn btn-primary" onClick={download}>

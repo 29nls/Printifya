@@ -13,11 +13,19 @@ import {
   clearDraft,
   loadArchive,
   loadDraft,
+  loadPaperId,
   saveArchive,
   saveDraft,
+  savePaperId,
   type ArchiveEntry,
 } from "./storage";
 import ResetPreferencesButton from "../../shared/ResetPreferencesButton";
+import {
+  getPaper,
+  PAPER_A4,
+  PAPER_SIZES,
+  type PaperSize,
+} from "../../photo-studio/shared/paperSize";
 import "../../photo-studio/shared/style.css";
 import "./style.css";
 
@@ -52,6 +60,9 @@ export default function TemplateSuratPage() {
   const logoRef = useRef<HTMLInputElement>(null);
   const [hydrated, setHydrated] = useState(false);
   const [archive, setArchive] = useState<ArchiveEntry[]>(() => loadArchive());
+  const [paper, setPaper] = useState<PaperSize>(() =>
+    getPaper(loadPaperId() ?? undefined)
+  );
 
   const fields = useMemo<LetterFields>(
     () => ({
@@ -122,6 +133,9 @@ export default function TemplateSuratPage() {
     return () => clearTimeout(t);
   }, [fields, hydrated]);
 
+  // Persist ukuran kertas terpilih.
+  useEffect(() => savePaperId(paper.id), [paper]);
+
   const onLogo = (file?: File | null) => {
     setError("");
     if (!file) return;
@@ -164,7 +178,7 @@ export default function TemplateSuratPage() {
     setInfo("");
     setExporting(true);
     try {
-      await exportLetterPdf(data);
+      await exportLetterPdf(data, paper);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Gagal membuat PDF.");
     } finally {
@@ -177,7 +191,7 @@ export default function TemplateSuratPage() {
     setError("");
     setPrinting(true);
     try {
-      const html = buildLetterHtml(data);
+      const html = buildLetterHtml(data, paper);
       const ok = printHtmlSheet(html);
       if (!ok) setError("Tidak bisa membuat iframe cetak di browser ini.");
     } catch (e) {
@@ -190,6 +204,7 @@ export default function TemplateSuratPage() {
   /** Reset semua data tersimpan (draf & riwayat) + form ke default. */
   const handleResetPrefs = () => {
     clearAllStorage();
+    setPaper(PAPER_A4);
     setArchive([]);
     setInstansi("PT Printifya Nusantara");
     setAlamat("Jl. Merdeka No. 45, Jakarta Pusat 10110");
@@ -232,7 +247,7 @@ export default function TemplateSuratPage() {
           <h1>Template Surat</h1>
           <p>
             Susun surat resmi ber-kop instansi dengan nomor &amp; tanggal
-            otomatis, pratinjau A4 live, lalu cetak atau simpan sebagai PDF.
+            otomatis, pratinjau cetak live, lalu cetak atau simpan sebagai PDF.
           </p>
         </div>
       </header>
@@ -461,6 +476,20 @@ export default function TemplateSuratPage() {
         {/* ---------- Pratinjau A4 ---------- */}
         <div className="letter-preview-col">
           <div className="letter-actions">
+            <label className="paper-field">
+              <span>Kertas</span>
+              <select
+                className="tool-select"
+                value={paper.id}
+                onChange={(e) => setPaper(getPaper(e.target.value))}
+              >
+                {PAPER_SIZES.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
             <button
               type="button"
               className="btn btn-primary"
@@ -483,7 +512,15 @@ export default function TemplateSuratPage() {
           </div>
 
           <div className="letter-preview-wrap">
-            <div className="letter-page">
+            <div
+              className="letter-page"
+              style={{
+                width: 595,
+                minHeight: Math.round(
+                  (595 * paper.heightMm) / paper.widthMm
+                ),
+              }}
+            >
               <div className="kop">
                 {logo && (
                   <img src={logo} alt="Logo instansi" className="kop-logo" />
@@ -539,8 +576,9 @@ export default function TemplateSuratPage() {
 
           <p className="hint">
             💡 Nomor &amp; tanggal otomatis mengikuti kode dan tanggal yang
-            dipilih. Pratinjau = tampilan cetak A4 (diskalakan); tombol cetak
-            membuka dialog browser untuk mencetak atau menyimpan PDF.
+            dipilih. Pratinjau = tampilan cetak {paper.name} (diskalakan);
+            tombol cetak membuka dialog browser untuk mencetak atau menyimpan
+            PDF dengan kertas {paper.name}.
           </p>
         </div>
       </div>

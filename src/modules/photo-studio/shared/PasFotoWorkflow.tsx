@@ -11,15 +11,23 @@ import {
   readStoredSizeId,
   writeStoredSizeId,
 } from "./sizeStorage";
+import {
+  getPaper,
+  PAPER_A4,
+  PAPER_SIZES,
+  type PaperSize,
+} from "./paperSize";
 import type { PasFotoSize } from "./pasFotoSize";
 import CropperEditor from "./CropperEditor";
 import A4SheetPreview from "./A4SheetPreview";
 import {
+  chooseOrientation,
   exportLayoutPdf,
   exportPasFotoPdf,
   fitsA4,
   maxCols,
   maxRows,
+  MIN_MARGIN_CM,
   printLayoutPdf,
   printPasFotoPdf,
 } from "./exportPdf";
@@ -92,9 +100,8 @@ export default function PasFotoWorkflow({
   useEffect(() => {
     if (sizeStorageKey) writeStoredSizeId(sizeStorageKey, activeSize.id);
   }, [activeSize, sizeStorageKey]);
-  // Batas input (maks di margin minimal) vs default grid (maks di margin default).
-  const maxC = maxCols(activeSize);
-  const maxR = maxRows(activeSize);
+  // Ukuran kertas lembar (default A4; bisa A3/A5/R2–R30).
+  const [paper, setPaper] = useState<PaperSize>(PAPER_A4);
 
   const [step, setStep] = useState<Step>(initialImage ? "edit" : "upload");
   const [originalUrl, setOriginalUrl] = useState<string | null>(
@@ -115,15 +122,27 @@ export default function PasFotoWorkflow({
   );
   const [error, setError] = useState("");
   const [dragOver, setDragOver] = useState(false);
-  const [cols, setCols] = useState(maxCols(activeSize, DEFAULT_MARGIN_CM));
-  const [rows, setRows] = useState(maxRows(activeSize, DEFAULT_MARGIN_CM));
+  const [cols, setCols] = useState(maxCols(activeSize, DEFAULT_MARGIN_CM, paper));
+  const [rows, setRows] = useState(maxRows(activeSize, DEFAULT_MARGIN_CM, paper));
+  // Batas input grid: maksimum di potret ATAU lanskap, agar grid yang hanya
+  // muat melintang tetap bisa dijangkau (orientasi otomatis mengikuti grid).
+  const maxC = Math.max(
+    maxCols(activeSize, MIN_MARGIN_CM, paper),
+    maxCols(activeSize, MIN_MARGIN_CM, paper, "landscape")
+  );
+  const maxR = Math.max(
+    maxRows(activeSize, MIN_MARGIN_CM, paper),
+    maxRows(activeSize, MIN_MARGIN_CM, paper, "landscape")
+  );
   const [marginCm, setMarginCm] = useState(DEFAULT_MARGIN_CM);
   const [exporting, setExporting] = useState(false);
   const [printing, setPrinting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
-  const canExport = fitsA4(activeSize, cols, rows, marginCm);
+  // Orientasi lembar: otomatis lanskap bila grid hanya muat bila lembar diputar.
+  const orientation = chooseOrientation(activeSize, cols, rows, marginCm, paper);
+  const canExport = fitsA4(activeSize, cols, rows, marginCm, paper, orientation);
   const count = cols * rows;
   const multiPage = people.length > count;
   const totalPages = Math.max(1, Math.ceil(people.length / count));
@@ -169,8 +188,8 @@ export default function PasFotoWorkflow({
     setPeople([]);
     setReplaceIndex(null);
     setPage(0);
-    setCols(maxCols(size, DEFAULT_MARGIN_CM));
-    setRows(maxRows(size, DEFAULT_MARGIN_CM));
+    setCols(maxCols(size, DEFAULT_MARGIN_CM, paper));
+    setRows(maxRows(size, DEFAULT_MARGIN_CM, paper));
     setError("");
     setStep(originalUrl ? "edit" : "upload");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -217,10 +236,20 @@ export default function PasFotoWorkflow({
     setPeople([]);
     setReplaceIndex(null);
     setPage(0);
-    setCols(maxCols(s, DEFAULT_MARGIN_CM));
-    setRows(maxRows(s, DEFAULT_MARGIN_CM));
+    setCols(maxCols(s, DEFAULT_MARGIN_CM, paper));
+    setRows(maxRows(s, DEFAULT_MARGIN_CM, paper));
     setError("");
     setStep(originalUrl ? "edit" : "upload");
+  };
+
+  /** Ganti ukuran kertas: grid disesuaikan agar muat di lembar baru. */
+  const selectPaper = (id: string) => {
+    const p = getPaper(id);
+    setPaper(p);
+    setCols(maxCols(activeSize, DEFAULT_MARGIN_CM, p));
+    setRows(maxRows(activeSize, DEFAULT_MARGIN_CM, p));
+    setPage(0);
+    setError("");
   };
 
   /** Reset preset tersimpan ke yang pertama; state ikut dipulihkan. */
@@ -307,12 +336,20 @@ export default function PasFotoWorkflow({
     setExporting(true);
     try {
       if (people.length <= 1) {
-        await exportPasFotoPdf(activeSize, croppedUrl, { cols, rows, marginCm });
+        await exportPasFotoPdf(activeSize, croppedUrl, {
+          cols,
+          rows,
+          marginCm,
+          paper,
+          orientation,
+        });
       } else {
         await exportLayoutPdf(activeSize, fillSrcs, {
           cols,
           rows,
           marginCm,
+          paper,
+          orientation,
           labels: showLabels ? fillLabels : undefined,
           labelSizePt: showLabels ? labelSizeDef.pt : undefined,
         });
@@ -335,11 +372,15 @@ export default function PasFotoWorkflow({
               cols,
               rows,
               marginCm,
+              paper,
+              orientation,
             })
           : await printLayoutPdf(activeSize, fillSrcs, {
               cols,
               rows,
               marginCm,
+              paper,
+              orientation,
               labels: showLabels ? fillLabels : undefined,
               labelSizePt: showLabels ? labelSizeDef.pt : undefined,
             });
@@ -603,7 +644,7 @@ export default function PasFotoWorkflow({
 
           <section className="panel sheet-section">
             <div className="sheet-head">
-              <h2>Pratinjau Template Cetak A4</h2>
+              <h2>Pratinjau Template Cetak {paper.name}</h2>
               {multiPage && (
                 <div className="page-nav">
                   <button
@@ -663,6 +704,20 @@ export default function PasFotoWorkflow({
                   onChange={(e) => setMarginCm(clampNum(e.target.value, 0.2, 1.5))}
                 />
               </label>
+              <label>
+                Kertas
+                <select
+                  className="tool-select"
+                  value={paper.id}
+                  onChange={(e) => selectPaper(e.target.value)}
+                >
+                  {PAPER_SIZES.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
               {people.length > 1 && !multiPage && (
                 <label className="repeat-toggle">
                   <input
@@ -715,7 +770,7 @@ export default function PasFotoWorkflow({
                 disabled={!canExport || exporting || printing}
                 onClick={handleExportPdf}
               >
-                {exporting ? "Menyiapkan PDF…" : "⬇️ Ekspor PDF A4"}
+                {exporting ? "Menyiapkan PDF…" : `⬇️ Ekspor PDF ${paper.name}`}
               </button>
             </div>
 
@@ -723,7 +778,7 @@ export default function PasFotoWorkflow({
 
             {!canExport && (
               <p className="error">
-                Grid {cols}×{rows} tidak muat di halaman A4 dengan margin {marginCm} cm.
+                Grid {cols}×{rows} tidak muat di halaman {paper.name} dengan margin {marginCm} cm.
                 Kurangi kolom/baris atau perbesar margin.
               </p>
             )}
@@ -735,6 +790,8 @@ export default function PasFotoWorkflow({
               cols={cols}
               rows={rows}
               marginCm={marginCm}
+              paper={paper}
+              orientation={orientation}
               labels={people.length > 1 && showLabels ? pageLabels : undefined}
               labelSizePx={
                 people.length > 1 && showLabels ? labelSizeDef.previewPx : undefined

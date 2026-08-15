@@ -1,12 +1,18 @@
 import { jsPDF } from "jspdf";
-import { formatTanggal, splitParagraf, type LetterData } from "./letterHtml";
+import {
+  formatTanggal,
+  splitParagraf,
+  type LetterData,
+} from "./letterHtml";
+import {
+  getPaper,
+  PAPER_A4,
+  type PaperSize,
+} from "../../photo-studio/shared/paperSize";
 
-const PAGE_W = 210; // A4 mm
-const PAGE_H = 297;
 const MARGIN_X = 22;
 const MARGIN_TOP = 25;
 const MARGIN_BOTTOM = 25;
-const CONTENT_W = PAGE_W - MARGIN_X * 2;
 
 /** Muat dimensi logo (data URL) agar rasio aspeknya terjaga di PDF. */
 function loadLogoDims(dataUrl: string): Promise<{ w: number; h: number }> {
@@ -29,10 +35,18 @@ function fileName(data: LetterData): string {
 
 /**
  * Ekspor surat resmi sebagai file PDF dengan teks native (selectable) —
- * memakai jsPDF secara langsung, bukan screenshot html2canvas.
+ * memakai jsPDF secara langsung, bukan screenshot html2canvas. Kertas default
+ * A4; bisa A3/A5/R2–R30 mengikuti pemilih kertas.
  */
-export async function exportLetterPdf(data: LetterData): Promise<void> {
-  const doc = new jsPDF({ unit: "mm", format: "a4" });
+export async function exportLetterPdf(
+  data: LetterData,
+  paper?: PaperSize
+): Promise<void> {
+  const p = getPaper(paper?.id ?? PAPER_A4.id);
+  const PAGE_W = p.widthMm;
+  const PAGE_H = p.heightMm;
+  const CONTENT_W = PAGE_W - MARGIN_X * 2;
+  const doc = new jsPDF({ unit: "mm", format: [PAGE_W, PAGE_H] });
   const paragraf = splitParagraf(data.isi);
 
   let y = MARGIN_TOP;

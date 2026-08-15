@@ -495,6 +495,27 @@
   gap: 12px;
 }
 
+.sheet-preview-head {
+  align-self: stretch;
+  display: flex;
+  justify-content: center;
+}
+
+/* Wadah pratinjau ukuran penuh (1:1): lembar lebih besar dari layar, di-scroll. */
+.sheet-preview-scroll {
+  max-width: 100%;
+  max-height: 72vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  padding: 14px;
+}
+
+.sheet-preview-scroll .sheet {
+  margin: 0 auto;
+}
+
 .sheet {
   background: #fff;
   border-radius: 4px;
@@ -548,6 +569,11 @@
   margin: 0;
   color: var(--text-muted);
   font-size: 13px;
+}
+
+.orientation-badge {
+  color: var(--accent);
+  font-weight: 600;
 }
 
 /* ---------- Responsif ---------- */

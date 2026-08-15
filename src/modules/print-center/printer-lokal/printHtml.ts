@@ -1,21 +1,28 @@
 import type { PasFotoSize } from "../../photo-studio/shared/pasFotoSize";
+import {
+  orientedDims,
+  type SheetOrientation,
+} from "../../photo-studio/shared/exportPdf";
+import { getPaper, PAPER_A4, type PaperSize } from "../../photo-studio/shared/paperSize";
 
 export interface HtmlSheetOptions {
   cols: number;
   rows: number;
   marginCm: number;
+  /** Ukuran kertas halaman; default A4. */
+  paper?: PaperSize;
+  /** Orientasi lembar; default potret (otomatis lanskap bila grid lebih muat melintang). */
+  orientation?: SheetOrientation;
   /** Label per foto (indeks sejajar dengan src); digambar di dasar tiap sel. */
   labels?: string[];
   /** Ukuran font label dalam pt. */
   labelSizePt?: number;
 }
 
-const PAGE_W_MM = 210; // A4
-const PAGE_H_MM = 297; // A4
-
 /**
- * Bangun dokumen HTML mandiri berisi grid pas foto A4 dengan ukuran fisik
- * presisi (mm) — alternatif cetak tanpa jsPDF.
+ * Bangun dokumen HTML mandiri berisi grid pas foto dengan ukuran fisik
+ * presisi (mm) — alternatif cetak tanpa jsPDF. Kertas default A4; bisa A3,
+ * A5, atau ukuran foto seri R (2R–30R).
  *
  * `src` bisa berupa satu gambar (diulang di semua sel — pola pas foto) atau
  * daftar gambar yang diisi sel per sel; bila lebih banyak dari jumlah sel,
@@ -24,12 +31,22 @@ const PAGE_H_MM = 297; // A4
 export function buildHtmlSheet(
   src: string | string[],
   size: PasFotoSize,
-  { cols, rows, marginCm, labels, labelSizePt = 7 }: HtmlSheetOptions
+  {
+    cols,
+    rows,
+    marginCm,
+    paper,
+    orientation = "portrait",
+    labels,
+    labelSizePt = 7,
+  }: HtmlSheetOptions
 ): string {
+  const p = getPaper(paper?.id ?? PAPER_A4.id);
+  const d = orientedDims(p, orientation);
   const gridW = size.widthMm * cols;
   const gridH = size.heightMm * rows;
-  const marginX = Math.max(marginCm * 10, (PAGE_W_MM - gridW) / 2);
-  const marginY = Math.max(marginCm * 10, (PAGE_H_MM - gridH) / 2);
+  const marginX = Math.max(marginCm * 10, (d.widthMm - gridW) / 2);
+  const marginY = Math.max(marginCm * 10, (d.heightMm - gridH) / 2);
   const count = cols * rows;
 
   const srcs = Array.isArray(src)
@@ -62,15 +79,15 @@ export function buildHtmlSheet(
 <html lang="id">
 <head>
 <meta charset="utf-8" />
-<title>Template A4 ${size.label}</title>
+<title>Template ${p.name} ${size.label}</title>
 <style>
-  @page { size: A4 portrait; margin: 0; }
+  @page { size: ${d.widthMm}mm ${d.heightMm}mm; margin: 0; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { width: 210mm; }
+  html, body { width: ${d.widthMm}mm; }
   .page {
     position: relative;
-    width: ${PAGE_W_MM}mm;
-    height: ${PAGE_H_MM}mm;
+    width: ${d.widthMm}mm;
+    height: ${d.heightMm}mm;
     page-break-after: always;
     break-after: page;
   }

@@ -1,8 +1,31 @@
 import { useEffect, useRef, useState } from "react";
 import { printHtmlSheet } from "../../print-center/printer-lokal/printHtml";
 import { buildDocHtml } from "./docHtml";
+import {
+  getPaper,
+  PAPER_SIZES,
+  type PaperSize,
+} from "../../photo-studio/shared/paperSize";
 import "../../photo-studio/shared/style.css";
 import "./style.css";
+
+const PAPER_KEY = "printifya.word-editor.paper";
+
+function loadPaperId(): string | null {
+  try {
+    return localStorage.getItem(PAPER_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function savePaperId(id: string): void {
+  try {
+    localStorage.setItem(PAPER_KEY, id);
+  } catch {
+    // storage penuh / tidak tersedia — abaikan
+  }
+}
 
 const HEADINGS = [
   { value: "p", label: "Paragraf" },
@@ -48,6 +71,12 @@ export default function WordEditorPage() {
   const [printing, setPrinting] = useState(false);
   const [error, setError] = useState("");
   const [active, setActive] = useState<Record<string, boolean>>({});
+  const [paper, setPaper] = useState<PaperSize>(() =>
+    getPaper(loadPaperId() ?? undefined)
+  );
+
+  // Persist ukuran kertas terpilih.
+  useEffect(() => savePaperId(paper.id), [paper]);
 
   const updateStats = () => {
     const text = editorRef.current?.innerText ?? "";
@@ -85,7 +114,7 @@ export default function WordEditorPage() {
     setPrinting(true);
     try {
       const content = editorRef.current?.innerHTML ?? "";
-      const html = buildDocHtml(title, content);
+      const html = buildDocHtml(title, content, paper);
       const ok = printHtmlSheet(html);
       if (!ok) {
         setError("Tidak bisa membuat iframe cetak di browser ini.");
@@ -128,6 +157,20 @@ export default function WordEditorPage() {
             onChange={(e) => setTitle(e.target.value)}
           />
           <div className="word-actions">
+            <label className="paper-field">
+              <span>Kertas</span>
+              <select
+                className="tool-select"
+                value={paper.id}
+                onChange={(e) => setPaper(getPaper(e.target.value))}
+              >
+                {PAPER_SIZES.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
             <button
               type="button"
               className="btn btn-primary"
@@ -215,6 +258,11 @@ export default function WordEditorPage() {
         <div
           ref={editorRef}
           className="editor-page"
+          style={{
+            minHeight: Math.round(
+              680 * (paper.heightMm / paper.widthMm) * (210 / 297)
+            ),
+          }}
           contentEditable
           suppressContentEditableWarning
           data-placeholder="Mulai menulis di sini…"
@@ -222,9 +270,9 @@ export default function WordEditorPage() {
         />
         {error && <p className="error">{error}</p>}
         <p className="hint word-stats">
-          {stats.words} kata · {stats.chars} karakter — siap cetak A4. Konten
-          berupa HTML; format yang tidak didukung tetap dipertahankan sebagai
-          teks.
+          {stats.words} kata · {stats.chars} karakter — siap cetak {paper.name}.
+          Konten berupa HTML; format yang tidak didukung tetap dipertahankan
+          sebagai teks.
         </p>
       </section>
     </div>

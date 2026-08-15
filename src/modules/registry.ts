@@ -33,6 +33,7 @@ const AutoCropFacePage = lazy(() => import("./ai-assistant/auto-crop-face"));
 const BackgroundRemovalPage = lazy(() => import("./ai-assistant/background-removal"));
 const EnhancePhotoPage = lazy(() => import("./ai-assistant/enhance-photo"));
 const AutoLayoutPage = lazy(() => import("./ai-assistant/auto-layout"));
+const UpscaleDenoisePage = lazy(() => import("./ai-assistant/upscale-denoise"));
 
 export interface Module {
   id: string;
@@ -111,7 +112,8 @@ export const MODULES: Module[] = [
         title: "Word Editor",
         path: "/document-studio/word-editor",
         icon: "📝",
-        description: "Editor teks kaya WYSIWYG dengan ekspor DOCX/PDF.",
+        description:
+          "Editor teks kaya WYSIWYG — format langsung, kertas A3–R30, lalu cetak / simpan PDF via dialog browser.",
         Component: WordEditorPage,
       },
       {
@@ -119,7 +121,8 @@ export const MODULES: Module[] = [
         title: "Excel Sheet",
         path: "/document-studio/excel-sheet",
         icon: "📊",
-        description: "Spreadsheet sederhana dengan formula dan ekspor XLSX.",
+        description:
+          "Spreadsheet 2 lembar dengan formula (SUM, IF, ROUND, TODAY…), format angka, ekspor CSV, dan cetak.",
         Component: ExcelSheetPage,
       },
       {
@@ -127,7 +130,8 @@ export const MODULES: Module[] = [
         title: "PDF Editor",
         path: "/document-studio/pdf-editor",
         icon: "📄",
-        description: "Lihat, gabung, dan pisah dokumen PDF siap cetak.",
+        description:
+          "Lihat, gabung, pisah, putar, dan hapus halaman PDF — langsung di browser (pdf-lib).",
         Component: PdfEditorPage,
       },
       {
@@ -135,7 +139,8 @@ export const MODULES: Module[] = [
         title: "Template Surat",
         path: "/document-studio/template-surat",
         icon: "✉️",
-        description: "Template surat resmi dengan kolom isian otomatis.",
+        description:
+          "Surat resmi ber-kop instansi: nomor/tanggal otomatis, arsip riwayat, kertas A3–R30, ekspor PDF & cetak.",
         Component: TemplateSuratPage,
       },
     ],
@@ -154,7 +159,8 @@ export const MODULES: Module[] = [
         title: "Printer Lokal",
         path: "/print-center/printer-lokal",
         icon: "🖨️",
-        description: "Cetak langsung via dialog browser / WebUSB / Print.js.",
+        description:
+          "Cetak template HTML (grid pas foto presisi mm) langsung ke printer lokal via dialog browser — iframe print, tanpa jsPDF.",
         Component: PrinterLokalPage,
       },
       {
@@ -170,7 +176,8 @@ export const MODULES: Module[] = [
         title: "Network Printer",
         path: "/print-center/network-printer",
         icon: "🌐",
-        description: "Cetak ke printer jaringan melalui protokol IPP.",
+        description:
+          "Cetak ke printer jaringan: rute otomatis QZ Tray (raw ESC/POS) → IPP → fallback PDF, dengan antrean job.",
         Component: NetworkPrinterPage,
       },
       {
@@ -178,7 +185,8 @@ export const MODULES: Module[] = [
         title: "PDF Export",
         path: "/print-center/pdf-export",
         icon: "📦",
-        description: "Ekspor foto dan dokumen ke PDF siap cetak.",
+        description:
+          "Ekspor foto (template pas foto) & dokumen ke PDF siap cetak — kertas A3–R30, margin, orientasi.",
         Component: PdfExportPage,
       },
     ],
@@ -213,7 +221,8 @@ export const MODULES: Module[] = [
         title: "Enhance Photo",
         path: "/ai-assistant/enhance-photo",
         icon: "✨",
-        description: "Perbaiki pencahayaan, kontras, dan ketajaman otomatis.",
+        description:
+          "Perbaiki pencahayaan, kontras, dan ketajaman otomatis berbasis histogram — slider manual, perbandingan sebelum/sesudah, terusan ke pas foto & Auto Layout, preferensi tersimpan dengan tombol reset.",
         Component: EnhancePhotoPage,
       },
       {
@@ -223,6 +232,15 @@ export const MODULES: Module[] = [
         icon: "🧩",
         description: "Susun banyak foto otomatis ke template halaman cetak.",
         Component: AutoLayoutPage,
+      },
+      {
+        id: "upscale-denoise",
+        title: "Upscale & Denoise",
+        path: "/ai-assistant/upscale-denoise",
+        icon: "⬆️",
+        description:
+          "Perbesar resolusi & kurangi noise (gaya Waifu2x): skala 2×–8×/kustom, denoise 0–3, TTA, batch, perbandingan format & PSNR — pengaturan tersimpan, terusan ke pas foto & Auto Layout, tombol reset preferensi.",
+        Component: UpscaleDenoisePage,
       },
     ],
   },

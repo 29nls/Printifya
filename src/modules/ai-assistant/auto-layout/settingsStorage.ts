@@ -15,6 +15,8 @@ export interface LayoutSettings {
   cols: number;
   rows: number;
   marginCm: number;
+  /** Id ukuran kertas (lihat photo-studio/shared/paperSize.ts); fallback "a4". */
+  paperId: string;
   showLabels: boolean;
   labelSize: string; // "small" | "medium" | "large"
 }
@@ -30,6 +32,7 @@ export function loadLayoutSettings(): Partial<LayoutSettings> | null {
       cols: typeof p.cols === "number" ? p.cols : undefined,
       rows: typeof p.rows === "number" ? p.rows : undefined,
       marginCm: typeof p.marginCm === "number" ? p.marginCm : undefined,
+      paperId: typeof p.paperId === "string" ? p.paperId : undefined,
       showLabels:
         typeof p.showLabels === "boolean" ? p.showLabels : undefined,
       labelSize:

@@ -1,16 +1,27 @@
 /**
- * Bangun dokumen HTML A4 siap cetak dari konten rich text editor —
- * memakai pola cetak HTML yang sama dengan modul Printer Lokal
- * (printHtmlSheet: iframe tersembunyi + dialog cetak browser, yang juga
- * memungkinkan "Simpan sebagai PDF" dari dialog).
+ * Bangun dokumen HTML siap cetak (default A4; bisa A3/A5/R2–R30) dari
+ * konten rich text editor — memakai pola cetak HTML yang sama dengan modul
+ * Printer Lokal (printHtmlSheet: iframe tersembunyi + dialog cetak browser,
+ * yang juga memungkinkan "Simpan sebagai PDF" dari dialog).
  */
+
+import {
+  getPaper,
+  PAPER_A4,
+  type PaperSize,
+} from "../../photo-studio/shared/paperSize";
 
 /** Buang tag <script> dari konten agar teks yang ditempel tidak mengeksekusi kode saat dicetak. */
 function sanitize(content: string): string {
   return content.replace(/<script[\s\S]*?<\/script>/gi, "");
 }
 
-export function buildDocHtml(title: string, content: string): string {
+export function buildDocHtml(
+  title: string,
+  content: string,
+  paper?: PaperSize
+): string {
+  const p = getPaper(paper?.id ?? PAPER_A4.id);
   const safeTitle =
     (title || "Dokumen").replace(/[<>&"]/g, (ch) =>
       ch === "<" ? "&lt;" : ch === ">" ? "&gt;" : ch === "&" ? "&amp;" : "&quot;"
@@ -22,7 +33,7 @@ export function buildDocHtml(title: string, content: string): string {
 <meta charset="utf-8" />
 <title>${safeTitle}</title>
 <style>
-  @page { size: A4 portrait; margin: 22mm 20mm; }
+  @page { size: ${p.widthMm}mm ${p.heightMm}mm; margin: 22mm 20mm; }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {

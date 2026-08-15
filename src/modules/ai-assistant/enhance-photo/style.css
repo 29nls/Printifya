@@ -58,6 +58,16 @@
   font-weight: 400;
 }
 
+/* ---------- Baris preferensi (prefix + reset) ---------- */
+
+.prefs-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
 /* ---------- Perbandingan sebelum / sesudah ---------- */
 
 .bg-compare {

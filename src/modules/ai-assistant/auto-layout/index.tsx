@@ -3,11 +3,18 @@ import { useNavigate } from "react-router-dom";
 import type { PasFotoSize } from "../../photo-studio/shared/pasFotoSize";
 import A4SheetPreview from "../../photo-studio/shared/A4SheetPreview";
 import {
+  chooseOrientation,
   exportLayoutPdf,
   fitsA4,
   maxCols,
   maxRows,
+  MIN_MARGIN_CM,
 } from "../../photo-studio/shared/exportPdf";
+import {
+  getPaper,
+  PAPER_SIZES,
+  type PaperSize,
+} from "../../photo-studio/shared/paperSize";
 import {
   buildHtmlSheet,
   printHtmlSheet,
@@ -108,21 +115,34 @@ export default function AutoLayoutPage() {
   }, []);
   const [error, setError] = useState("");
   const [dragOver, setDragOver] = useState(false);
-  // Pengaturan grid & label — default dari localStorage, di-clamp ke preset aktif
-  // (batas maks kolom/baris berbeda per ukuran pas foto).
+  // Pengaturan kertas, grid & label — default dari localStorage, di-clamp ke
+  // preset aktif & kertas aktif (batas maks kolom/baris berbeda per ukuran).
   const [saved] = useState(() => loadLayoutSettings());
+  const [paper, setPaper] = useState<PaperSize>(() => getPaper(saved?.paperId));
+  // Batas grid maksimum: potret ATAU lanskap (grid yang hanya muat melintang
+  // tetap bisa dijangkau; orientasi otomatis mengikuti grid).
+  const initMaxC =
+    Math.max(
+      maxCols(PRESETS[1], MIN_MARGIN_CM, paper),
+      maxCols(PRESETS[1], MIN_MARGIN_CM, paper, "landscape")
+    );
+  const initMaxR =
+    Math.max(
+      maxRows(PRESETS[1], MIN_MARGIN_CM, paper),
+      maxRows(PRESETS[1], MIN_MARGIN_CM, paper, "landscape")
+    );
   const [cols, setCols] = useState(() =>
     clampInt(
-      String(saved?.cols ?? maxCols(PRESETS[1], DEFAULT_MARGIN_CM)),
+      String(saved?.cols ?? maxCols(PRESETS[1], DEFAULT_MARGIN_CM, paper)),
       1,
-      maxCols(PRESETS[1])
+      initMaxC
     )
   );
   const [rows, setRows] = useState(() =>
     clampInt(
-      String(saved?.rows ?? maxRows(PRESETS[1], DEFAULT_MARGIN_CM)),
+      String(saved?.rows ?? maxRows(PRESETS[1], DEFAULT_MARGIN_CM, paper)),
       1,
-      maxRows(PRESETS[1])
+      initMaxR
     )
   );
   const [marginCm, setMarginCm] = useState(() =>
@@ -134,20 +154,30 @@ export default function AutoLayoutPage() {
     (saved?.labelSize as LabelSizeValue) ?? "medium"
   );
 
-  // Persist pengaturan grid & label setiap berubah.
+  // Persist pengaturan kertas, grid & label setiap berubah.
   useEffect(() => {
-    saveLayoutSettings({ cols, rows, marginCm, showLabels, labelSize });
-  }, [cols, rows, marginCm, showLabels, labelSize]);
+    saveLayoutSettings({ cols, rows, marginCm, paperId: paper.id, showLabels, labelSize });
+  }, [cols, rows, marginCm, paper, showLabels, labelSize]);
   const [exporting, setExporting] = useState(false);
   const [printing, setPrinting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const urlsRef = useRef<string[]>([]);
   const navigate = useNavigate();
 
-  const maxC = maxCols(size);
-  const maxR = maxRows(size);
+  const maxC = Math.max(
+    maxCols(size, MIN_MARGIN_CM, paper),
+    maxCols(size, MIN_MARGIN_CM, paper, "landscape")
+  );
+  const maxR = Math.max(
+    maxRows(size, MIN_MARGIN_CM, paper),
+    maxRows(size, MIN_MARGIN_CM, paper, "landscape")
+  );
   const count = cols * rows;
-  const canExport = photos.length > 0 && fitsA4(size, cols, rows, marginCm);
+  // Orientasi lembar: otomatis lanskap bila grid hanya muat bila lembar diputar.
+  const orientation = chooseOrientation(size, cols, rows, marginCm, paper);
+  const canExport =
+    photos.length > 0 &&
+    fitsA4(size, cols, rows, marginCm, paper, orientation);
   const multiPage = photos.length > count;
   const totalPages = Math.max(1, Math.ceil(photos.length / count));
 
@@ -202,8 +232,18 @@ export default function AutoLayoutPage() {
 
   const selectSize = (s: PasFotoSize) => {
     setSize(s);
-    setCols(maxCols(s, DEFAULT_MARGIN_CM));
-    setRows(maxRows(s, DEFAULT_MARGIN_CM));
+    setCols(maxCols(s, DEFAULT_MARGIN_CM, paper));
+    setRows(maxRows(s, DEFAULT_MARGIN_CM, paper));
+    setError("");
+  };
+
+  /** Ganti ukuran kertas: grid disesuaikan agar muat di lembar baru. */
+  const selectPaper = (id: string) => {
+    const p = getPaper(id);
+    setPaper(p);
+    setCols(maxCols(size, DEFAULT_MARGIN_CM, p));
+    setRows(maxRows(size, DEFAULT_MARGIN_CM, p));
+    setPage(0);
     setError("");
   };
 
@@ -272,6 +312,8 @@ export default function AutoLayoutPage() {
         cols,
         rows,
         marginCm,
+        paper,
+        orientation,
         labels: showLabels ? photos.map((p) => p.name) : undefined,
         labelSizePt: showLabels ? labelSizeDef.pt : undefined,
       });
@@ -299,6 +341,8 @@ export default function AutoLayoutPage() {
         cols,
         rows,
         marginCm,
+        paper,
+        orientation,
         labels: showLabels ? items.map((p) => p.name) : undefined,
         labelSizePt: showLabels ? labelSizeDef.pt : undefined,
       });
@@ -479,6 +523,20 @@ export default function AutoLayoutPage() {
                   }
                 />
               </label>
+              <label>
+                Kertas
+                <select
+                  className="tool-select"
+                  value={paper.id}
+                  onChange={(e) => selectPaper(e.target.value)}
+                >
+                  {PAPER_SIZES.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <label className="label-toggle">
                 <input
                   type="checkbox"
@@ -519,7 +577,7 @@ export default function AutoLayoutPage() {
                 disabled={!canExport || exporting || printing}
                 onClick={handleExport}
               >
-                {exporting ? "Menyiapkan PDF…" : "⬇️ Ekspor PDF A4"}
+                {exporting ? "Menyiapkan PDF…" : `⬇️ Ekspor PDF ${paper.name}`}
               </button>
               <ResetPreferencesButton
                 title="Hapus pengaturan grid & label tersimpan modul ini"
@@ -529,7 +587,7 @@ export default function AutoLayoutPage() {
 
             {!canExport && (
               <p className="error">
-                Grid {cols}×{rows} tidak muat di halaman A4 dengan margin{" "}
+                Grid {cols}×{rows} tidak muat di halaman {paper.name} dengan margin{" "}
                 {marginCm} cm. Kurangi kolom/baris atau perbesar margin.
               </p>
             )}
@@ -537,7 +595,7 @@ export default function AutoLayoutPage() {
 
           <section className="panel sheet-section">
             <div className="sheet-head">
-              <h2>Pratinjau Template A4</h2>
+              <h2>Pratinjau Template {paper.name}</h2>
               {multiPage && (
                 <div className="page-nav">
                   <button
@@ -570,6 +628,8 @@ export default function AutoLayoutPage() {
               cols={cols}
               rows={rows}
               marginCm={marginCm}
+              paper={paper}
+              orientation={orientation}
               labels={showLabels ? pageLabels : undefined}
               labelSizePx={showLabels ? labelSizeDef.previewPx : undefined}
             />

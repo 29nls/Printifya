@@ -1,8 +1,15 @@
 /**
  * Bantuan untuk surat resmi Indonesia: format tanggal, nomor surat otomatis
- * (urutan/KODE/BULAN-ROMawi/TAHUN), dan pembangun HTML A4 siap cetak —
- * memakai pola cetak HTML yang sama dengan Printer Lokal / Word Editor.
+ * (urutan/KODE/BULAN-ROMawi/TAHUN), dan pembangun HTML siap cetak (default
+ * A4; bisa A3/A5/R2–R30) — memakai pola cetak HTML yang sama dengan Printer
+ * Lokal / Word Editor.
  */
+
+import {
+  getPaper,
+  PAPER_A4,
+  type PaperSize,
+} from "../../photo-studio/shared/paperSize";
 
 export interface LetterData {
   instansi: string;
@@ -60,8 +67,9 @@ function esc(text: string): string {
   );
 }
 
-/** Bangun dokumen HTML A4 siap cetak dari data surat. */
-export function buildLetterHtml(data: LetterData): string {
+/** Bangun dokumen HTML siap cetak dari data surat (kertas default A4). */
+export function buildLetterHtml(data: LetterData, paper?: PaperSize): string {
+  const p = getPaper(paper?.id ?? PAPER_A4.id);
   const paragraf = splitParagraf(data.isi);
   const body = paragraf.map((p) => `<p>${esc(p)}</p>`).join("\n");
 
@@ -75,7 +83,7 @@ export function buildLetterHtml(data: LetterData): string {
 <meta charset="utf-8" />
 <title>${esc(data.perihal || "Surat Resmi")}</title>
 <style>
-  @page { size: A4 portrait; margin: 25mm 22mm; }
+  @page { size: ${p.widthMm}mm ${p.heightMm}mm; margin: 25mm 22mm; }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {
