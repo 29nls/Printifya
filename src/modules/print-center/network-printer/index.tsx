@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { jsPDF } from "jspdf";
+import { loadJSON, saveJSON } from "../../shared/prefsStorage";
 import {
   createQzClient,
   escposText,
@@ -31,21 +32,15 @@ interface Job {
 const STORE_KEY = "printifya.network-printers";
 
 function loadPrinters(): Printer[] {
-  try {
-    const raw = localStorage.getItem(STORE_KEY);
-    const list = raw ? (JSON.parse(raw) as Printer[]) : [];
-    return Array.isArray(list) ? list : [];
-  } catch {
-    return [];
-  }
+  return (
+    loadJSON<Printer[]>(STORE_KEY, (value) =>
+      Array.isArray(value) ? (value as Printer[]) : null
+    ) ?? []
+  );
 }
 
 function savePrinters(list: Printer[]): void {
-  try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(list));
-  } catch {
-    /* abaikan */
-  }
+  saveJSON(STORE_KEY, list);
 }
 
 export default function NetworkPrinterPage() {

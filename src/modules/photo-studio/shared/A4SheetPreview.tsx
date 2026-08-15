@@ -1,8 +1,9 @@
 import { useState } from "react";
 import {
+  computeSheetLayout,
   orientedDims,
   type SheetOrientation,
-} from "./exportPdf";
+} from "./sheetLayout";
 import type { PasFotoSize } from "./pasFotoSize";
 import { getPaper, PAPER_A4, type PaperSize } from "./paperSize";
 
@@ -75,14 +76,17 @@ export default function A4SheetPreview({
   const fullScale = FULL_SCALE_MM * 10; // px per cm
   const scale = fullSize ? fullScale : fitScale;
 
-  const count = cols * rows;
-  const sheetW = (d.widthMm / 10) * scale;
-  const sheetH = (d.heightMm / 10) * scale;
-  const photoW = (size.widthMm / 10) * scale;
-  const photoH = (size.heightMm / 10) * scale;
-  const margin = marginCm * scale;
-  const innerW = sheetW - margin * 2;
-  const innerH = sheetH - margin * 2;
+  // Tata letak dihitung dalam mm oleh helper yang sama dengan PDF & cetak
+  // (grid + margin sentris), lalu diskalakan ke px pratinjau.
+  const layout = computeSheetLayout(size, cols, rows, marginCm, p, orientation);
+  const px = scale / 10; // px per mm
+  const count = layout.count;
+  const sheetW = d.widthMm * px;
+  const sheetH = d.heightMm * px;
+  const gridW = layout.gridW * px;
+  const gridH = layout.gridH * px;
+  const padX = layout.marginX * px;
+  const padY = layout.marginY * px;
 
   const photos = srcs ?? (src ? Array.from({ length: count }, () => src) : []);
   const isMulti = srcs !== undefined;
@@ -91,16 +95,16 @@ export default function A4SheetPreview({
   const sheet = (
     <div
       className="sheet"
-      style={{ width: sheetW, height: sheetH, padding: margin }}
+      style={{ width: sheetW, height: sheetH, padding: `${padY}px ${padX}px` }}
     >
       <div
         className={`sheet-grid${cutLines ? " cut-lines" : ""}`}
         style={{
-          gridTemplateColumns: `repeat(${cols}, ${photoW}px)`,
-          gridTemplateRows: `repeat(${rows}, ${photoH}px)`,
+          gridTemplateColumns: `repeat(${cols}, ${size.widthMm * px}px)`,
+          gridTemplateRows: `repeat(${rows}, ${size.heightMm * px}px)`,
           gap: 0,
-          width: innerW,
-          height: innerH,
+          width: gridW,
+          height: gridH,
         }}
       >
         {Array.from({ length: count }).map((_, i) => (

@@ -1,6 +1,26 @@
 import { jsPDF } from "jspdf";
 import type { PasFotoSize } from "./pasFotoSize";
-import { getPaper, PAPER_A4, type PaperSize } from "./paperSize";
+import { getPaper, type PaperSize } from "./paperSize";
+import {
+  computeSheetLayout,
+  fitsA4,
+  orientedDims,
+  sheetCellXY,
+  sheetPageCount,
+  type SheetOrientation,
+} from "./sheetLayout";
+
+// Matematika tata letak lembar kini tinggal di sheetLayout.ts (tanpa jsPDF);
+// re-ekspor ini menjaga pemakai lama tetap berfungsi tanpa perubahan.
+export {
+  MIN_MARGIN_CM,
+  chooseOrientation,
+  fitsA4,
+  maxCols,
+  maxRows,
+  orientedDims,
+  type SheetOrientation,
+} from "./sheetLayout";
 
 export interface PdfSheetOptions {
   cols: number;
@@ -16,82 +36,6 @@ export interface PdfSheetOptions {
   labelSizePt?: number;
   /** Garis potong putus-putus antar sel (mudah dipotong setelah cetak). */
   cutLines?: boolean;
-}
-
-export const MIN_MARGIN_CM = 0.2;
-
-export type SheetOrientation = "portrait" | "landscape";
-
-/** Dimensi efektif kertas sesuai orientasi (lanskap = diputar 90°). */
-export function orientedDims(
-  paper: PaperSize,
-  orientation: SheetOrientation = "portrait"
-): { widthMm: number; heightMm: number } {
-  return orientation === "landscape"
-    ? { widthMm: paper.heightMm, heightMm: paper.widthMm }
-    : { widthMm: paper.widthMm, heightMm: paper.heightMm };
-}
-
-/**
- * Orientasi terbaik untuk grid tertentu: potret selama muat; otomatis lanskap
- * bila grid hanya muat bila lembar diputar melintang.
- */
-export function chooseOrientation(
-  size: PasFotoSize,
-  cols: number,
-  rows: number,
-  marginCm: number,
-  paper: PaperSize = PAPER_A4
-): SheetOrientation {
-  return fitsA4(size, cols, rows, marginCm, paper, "portrait")
-    ? "portrait"
-    : "landscape";
-}
-
-/** Cek apakah grid foto muat dalam halaman (default A4) dengan margin & orientasi tertentu. */
-export function fitsA4(
-  size: PasFotoSize,
-  cols: number,
-  rows: number,
-  marginCm: number,
-  paper: PaperSize = PAPER_A4,
-  orientation: SheetOrientation = "portrait"
-): boolean {
-  const d = orientedDims(paper, orientation);
-  return (
-    size.widthMm * cols + 2 * marginCm * 10 <= d.widthMm &&
-    size.heightMm * rows + 2 * marginCm * 10 <= d.heightMm
-  );
-}
-
-/**
- * Jumlah kolom maksimal yang muat di halaman (default A4) dengan margin
- * & orientasi tertentu (default: margin minimal, potret).
- */
-export function maxCols(
-  size: PasFotoSize,
-  marginCm: number = MIN_MARGIN_CM,
-  paper: PaperSize = PAPER_A4,
-  orientation: SheetOrientation = "portrait"
-): number {
-  let c = 1;
-  while (fitsA4(size, c + 1, 1, marginCm, paper, orientation)) c += 1;
-  return c;
-}
-
-/**
- * Jumlah baris maksimal yang muat di halaman (default A4) dengan margin
- * & orientasi tertentu (default: margin minimal, potret).
- */
-export function maxRows(
-  size: PasFotoSize,
-  marginCm: number = MIN_MARGIN_CM,
-  paper: PaperSize = PAPER_A4,
-  orientation: SheetOrientation = "portrait"
-): number {
-  let r = 1;
-  while (fitsA4(size, 1, r + 1, marginCm, paper, orientation)) r += 1;
-  return r;
 }
 
 /** Komposit gambar di atas latar putih lalu encode JPEG agar PDF lebih ringkas. */
@@ -118,8 +62,9 @@ function toJpegOnWhite(dataUrl: string): Promise<string> {
 }
 
 /**
- * Bangun dokumen PDF A4 berisi grid pas foto pada ukuran fisik presisi (mm),
- * margin sesuai pengaturan, dan grid diratakan di tengah halaman.
+ * Bangun dokumen PDF berisi grid pas foto pada ukuran fisik presisi (mm),
+ * margin sesuai pengaturan, dan grid diratakan di tengah halaman — tata
+ * letak dihitung oleh sheetLayout.ts, sama persis dengan pratinjau & cetak.
  *
  * `dataUrls` bisa berupa satu gambar (diulang di semua sel — pola pas foto)
  * atau daftar gambar yang diisi sel per sel; bila lebih banyak dari jumlah
@@ -159,22 +104,16 @@ async function buildSheetDoc(
     orientation: orient === "landscape" ? "landscape" : "portrait",
   });
 
-  const gridW = size.widthMm * cols;
-  const gridH = size.heightMm * rows;
-  const marginX = Math.max(marginCm * 10, (d.widthMm - gridW) / 2);
-  const marginY = Math.max(marginCm * 10, (d.heightMm - gridH) / 2);
-
-  const count = cols * rows;
-  const pages = Math.max(1, Math.ceil(jpegs.length / count));
+  const layout = computeSheetLayout(size, cols, rows, marginCm, p, orient);
+  const pages = sheetPageCount(jpegs.length, layout.count);
   const labelSize = labelSizePt ?? 7;
 
   for (let page = 0; page < pages; page++) {
     if (page > 0) doc.addPage();
-    for (let i = 0; i < count; i++) {
-      const idx = page * count + i;
+    for (let i = 0; i < layout.count; i++) {
+      const idx = page * layout.count + i;
       if (idx >= jpegs.length) break; // halaman terakhir boleh tidak penuh
-      const x = marginX + (i % cols) * size.widthMm;
-      const y = marginY + Math.floor(i / cols) * size.heightMm;
+      const { x, y } = sheetCellXY(i, cols, size, layout);
       doc.addImage(jpegs[idx], "JPEG", x, y, size.widthMm, size.heightMm);
 
       const label = labels?.[idx];
@@ -199,12 +138,12 @@ async function buildSheetDoc(
       doc.setDrawColor(150, 150, 150);
       doc.setLineDashPattern([0.8, 0.7], 0);
       for (let c = 1; c < cols; c++) {
-        const x = marginX + c * size.widthMm;
-        doc.line(x, marginY, x, marginY + gridH);
+        const x = layout.marginX + c * size.widthMm;
+        doc.line(x, layout.marginY, x, layout.marginY + layout.gridH);
       }
       for (let r = 1; r < rows; r++) {
-        const y = marginY + r * size.heightMm;
-        doc.line(marginX, y, marginX + gridW, y);
+        const y = layout.marginY + r * size.heightMm;
+        doc.line(layout.marginX, y, layout.marginX + layout.gridW, y);
       }
       doc.restoreGraphicsState();
     }

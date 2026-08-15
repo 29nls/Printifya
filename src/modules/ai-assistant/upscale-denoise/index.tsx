@@ -14,6 +14,7 @@ import {
   setPendingLayoutPhoto,
   setPendingLayoutPhotos,
 } from "../../shared/autoLayoutBridge";
+import { decideFormatToggle } from "./formatCompare";
 import {
   clearW2xOptions,
   DEFAULT_W2X_OPTIONS,
@@ -233,14 +234,20 @@ export default function UpscaleDenoisePage() {
 
   /** Buka tabel perbandingan format (PNG/WebP/JPG) untuk satu item.
    *  Dihitung on-demand dengan indikator loading, hasil di-cache di item
-   *  (buka ulang instan); kanvas hasil dibuang setelah dipakai. */
+   *  (buka ulang instan); kanvas hasil dibuang setelah dipakai. Keputusan
+   *  toggle (cache / guard per-id / tutup) dihitung murni di
+   *  `decideFormatToggle` agar bisa diuji unit. */
   const toggleFormats = async (it: Item) => {
-    if (showFormats === it.id) {
+    const decision = decideFormatToggle(it, {
+      openId: showFormats,
+      loading: formatLoading,
+    });
+    if (decision.action === "close") {
       setShowFormats(null);
       return;
     }
     setShowFormats(it.id);
-    if (it.formats || formatLoading.has(it.id)) return; // cache / sedang dihitung
+    if (decision.action !== "compute") return; // cache / sedang dihitung
     setFormatLoading((prev) => new Set(prev).add(it.id));
     try {
       const canvas =

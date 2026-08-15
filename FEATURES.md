@@ -61,6 +61,9 @@ Dihasilkan oleh `exportPasFotoPdf` (`{fileName}-a4.pdf`) untuk satu foto dan
     `exportLayoutPdf`, `printPasFotoPdf`, `printLayoutPdf` (autoPrint).
   - `printHtml.ts` — `buildHtmlSheet` + `printHtmlSheet` (cetak HTML via iframe, tanpa jsPDF).
   - `pasFotoBridge` — meneruskan hasil modul mana pun ke alur crop Pas Foto 3×4.
+  - `prefsStorage.ts` (`src/modules/shared/`) — satu helper akses localStorage bersama
+    (`loadJSON` + validator, `saveJSON`, `loadString`/`saveString` untuk kunci string mentah,
+    `removeKeys`) dipakai semua modul; tidak ada `localStorage.*` langsung di luar helper ini.
 - **Cetak**: modul pas foto memakai jalur PDF + autoPrint (`printPasFotoPdf` / `printLayoutPdf`);
   Auto Layout memakai jalur HTML iframe (`printHtmlSheet`). Keduanya menampilkan dialog cetak
   browser / Simpan sebagai PDF.
@@ -216,7 +219,14 @@ koreksi berbasis histogram, dan upscale/denoise gaya Waifu2x.
   `ResetPreferencesButton` (konfirmasi dua-klik): Auto Crop Face (zoom `--facePercent`),
   Background Removal (opsi segmen + awalan), Enhance Photo (awalan), Auto Layout
   (grid/kertas/label/bingkai/garis potong), Upscale & Denoise (skala/denoise/TTA/format/
-  kualitas + awalan).
+  kualitas + awalan). Semua akses localStorage lewat helper bersama
+  `src/modules/shared/prefsStorage.ts` (`loadJSON` dengan validator per modul, `saveJSON`,
+  `loadString`/`saveString`, `removeKeys`) — modul yang memvalidasi field saat muat (Auto
+  Layout, Upscale & Denoise, Background Removal, Custom Size, Network Printer) meneruskan
+  validatornya ke helper; kunci string mentah (awalan label, ukuran kertas Word
+  Editor/Template Surat, zoom wajah) memakai `loadString`/`saveString` dengan semantik
+  `getItem` yang sama. Helper ini juga dipakai Photo Studio, Template Surat, dan Network
+  Printer, jadi kunci `printifya.*` dan format data lama tetap terbaca tanpa migrasi.
 - **Edit Auto Layout**: foto bisa di-drag untuk mengatur ulang urutan — antar sel di lembar
   maupun thumbnail di strip (keduanya memakai array foto yang sama, jadi pratinjau, label,
   PDF, dan cetak ikut urutan baru). Bingkai photobox berasal dari

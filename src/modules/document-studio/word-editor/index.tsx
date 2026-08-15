@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { printHtmlSheet } from "../../print-center/printer-lokal/printHtml";
+import { loadString, saveString } from "../../shared/prefsStorage";
 import { buildDocHtml } from "./docHtml";
 import {
   getPaper,
@@ -12,19 +13,11 @@ import "./style.css";
 const PAPER_KEY = "printifya.word-editor.paper";
 
 function loadPaperId(): string | null {
-  try {
-    return localStorage.getItem(PAPER_KEY);
-  } catch {
-    return null;
-  }
+  return loadString(PAPER_KEY, null);
 }
 
 function savePaperId(id: string): void {
-  try {
-    localStorage.setItem(PAPER_KEY, id);
-  } catch {
-    // storage penuh / tidak tersedia — abaikan
-  }
+  saveString(PAPER_KEY, id);
 }
 
 const HEADINGS = [

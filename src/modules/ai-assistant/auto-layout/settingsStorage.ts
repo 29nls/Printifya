@@ -1,13 +1,19 @@
 /**
- * Penyimpanan pengaturan Auto Layout ke localStorage (pola sama dengan
- * bgOptionsStorage.ts / storage.ts Template Surat): kunci ber-prefix
- * `printifya.` dan akses dibungkus try/catch.
+ * Penyimpanan pengaturan Auto Layout ke localStorage (via prefsStorage
+ * bersama, pola sama dengan modul AI lain): kunci ber-prefix `printifya.`
+ * dan akses dibungkus try/catch.
  *
- * Yang disimpan: grid (kolom/baris/margin) dan label (tampilkan nama,
- * ukuran label) — dipakai sebagai nilai default pada kunjungan berikutnya.
- * Kolom/baris di-clamp terhadap preset ukuran aktif oleh pemanggil
- * (batas maks berbeda per ukuran pas foto).
+ * Yang disimpan: grid (kolom/baris/margin), label (tampilkan nama, ukuran
+ * label), bingkai photobox & garis potong — dipakai sebagai nilai default
+ * pada kunjungan berikutnya. Kolom/baris di-clamp terhadap preset ukuran
+ * aktif oleh pemanggil (batas maks berbeda per ukuran pas foto).
  */
+
+import {
+  loadJSON,
+  removeKeys,
+  saveJSON,
+} from "../../shared/prefsStorage";
 
 const SETTINGS_KEY = "printifya.auto-layout.settings";
 
@@ -28,10 +34,9 @@ export interface LayoutSettings {
 const LABEL_SIZES = ["small", "medium", "large"];
 
 export function loadLayoutSettings(): Partial<LayoutSettings> | null {
-  try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (raw === null) return null;
-    const p = JSON.parse(raw) as Partial<LayoutSettings>;
+  return loadJSON<Partial<LayoutSettings>>(SETTINGS_KEY, (value) => {
+    if (!value || typeof value !== "object") return null;
+    const p = value as Partial<LayoutSettings>;
     return {
       cols: typeof p.cols === "number" ? p.cols : undefined,
       rows: typeof p.rows === "number" ? p.rows : undefined,
@@ -47,24 +52,14 @@ export function loadLayoutSettings(): Partial<LayoutSettings> | null {
       cutLines:
         typeof p.cutLines === "boolean" ? p.cutLines : undefined,
     };
-  } catch {
-    return null;
-  }
+  });
 }
 
 export function saveLayoutSettings(s: LayoutSettings): void {
-  try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
-  } catch {
-    // storage penuh / tidak tersedia — abaikan
-  }
+  saveJSON(SETTINGS_KEY, s);
 }
 
 /** Hapus kunci localStorage milik modul ini. */
 export function clearLayoutSettings(): void {
-  try {
-    localStorage.removeItem(SETTINGS_KEY);
-  } catch {
-    // abaikan
-  }
+  removeKeys(SETTINGS_KEY);
 }

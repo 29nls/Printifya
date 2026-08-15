@@ -1,6 +1,6 @@
 /**
- * Penyimpanan opsi Upscale & Denoise ke localStorage (pola sama dengan
- * bgOptionsStorage.ts di Background Removal): kunci ber-prefix `printifya.`
+ * Penyimpanan opsi Upscale & Denoise ke localStorage (via prefsStorage
+ * bersama, pola sama dengan modul AI lain): kunci ber-prefix `printifya.`
  * dan akses dibungkus try/catch.
  *
  * Yang disimpan:
@@ -8,6 +8,12 @@
  *   sebagai nilai default pada kunjungan berikutnya.
  * - Awalan label terusan ke Auto Layout.
  */
+
+import {
+  loadJSON,
+  removeKeys,
+  saveJSON,
+} from "../../shared/prefsStorage";
 
 export interface W2xOptions {
   scaleId: string; // "2x" | "4x" | "8x" | "custom"
@@ -35,29 +41,16 @@ export const DEFAULT_W2X_OPTIONS: W2xOptions = {
 
 const DEFAULT_PREFIX = "waifu2x-";
 
-function read<T>(key: string): T | null {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : null;
-  } catch {
-    return null;
-  }
-}
-
-function write(key: string, value: unknown): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // storage penuh / tidak tersedia — abaikan
-  }
-}
-
 const clamp = (n: number, min: number, max: number) =>
   Math.min(max, Math.max(min, n));
 
 /** Baca pengaturan proses tersimpan (tiap field divalidasi). */
 export function loadW2xOptions(): W2xOptions {
-  const p = read<Partial<W2xOptions>>(OPTIONS_KEY);
+  const p = loadJSON<Partial<W2xOptions>>(OPTIONS_KEY, (value) =>
+    value && typeof value === "object"
+      ? (value as Partial<W2xOptions>)
+      : null
+  );
   if (!p) return { ...DEFAULT_W2X_OPTIONS };
   return {
     scaleId:
@@ -86,24 +79,19 @@ export function loadW2xOptions(): W2xOptions {
 }
 
 export function saveW2xOptions(opts: W2xOptions): void {
-  write(OPTIONS_KEY, opts);
+  saveJSON(OPTIONS_KEY, opts);
 }
 
 /** Baca awalan label tersimpan; fallback "waifu2x-". */
 export function loadLayoutPrefix(): string {
-  return read<string>(PREFIX_KEY) ?? DEFAULT_PREFIX;
+  return loadJSON<string>(PREFIX_KEY) ?? DEFAULT_PREFIX;
 }
 
 export function saveLayoutPrefix(prefix: string): void {
-  write(PREFIX_KEY, prefix);
+  saveJSON(PREFIX_KEY, prefix);
 }
 
 /** Hapus semua kunci localStorage milik modul ini sekaligus. */
 export function clearW2xOptions(): void {
-  try {
-    localStorage.removeItem(OPTIONS_KEY);
-    localStorage.removeItem(PREFIX_KEY);
-  } catch {
-    // abaikan
-  }
+  removeKeys(OPTIONS_KEY, PREFIX_KEY);
 }

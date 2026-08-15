@@ -1,8 +1,14 @@
 /**
- * Penyimpanan ukuran kustom (lebar/tinggi/DPI) ke localStorage — pola sama
- * dengan storage.ts Template Surat: kunci ber-prefix `printifya.` dan akses
- * dibungkus try/catch.
+ * Penyimpanan ukuran kustom (lebar/tinggi/DPI) ke localStorage — via
+ * prefsStorage bersama (pola sama dengan modul lain): kunci ber-prefix
+ * `printifya.` dan akses dibungkus try/catch.
  */
+
+import {
+  loadJSON,
+  removeKeys,
+  saveJSON,
+} from "../../shared/prefsStorage";
 
 export interface CustomSizePrefs {
   widthCm: number;
@@ -19,36 +25,27 @@ const clamp = (n: number, min: number, max: number) =>
 
 /** Baca ukuran kustom tersimpan (tervalidasi & ter-clamp); fallback default. */
 export function loadCustomSize(): CustomSizePrefs {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw === null) return { ...DEFAULTS };
-    const p = JSON.parse(raw) as Partial<CustomSizePrefs>;
-    return {
-      widthCm:
-        typeof p.widthCm === "number" ? clamp(p.widthCm, 0.5, 30) : DEFAULTS.widthCm,
-      heightCm:
-        typeof p.heightCm === "number" ? clamp(p.heightCm, 0.5, 30) : DEFAULTS.heightCm,
-      dpi:
-        typeof p.dpi === "number" ? clamp(Math.round(p.dpi), 72, 600) : DEFAULTS.dpi,
-    };
-  } catch {
-    return { ...DEFAULTS };
-  }
+  const p = loadJSON<Partial<CustomSizePrefs>>(KEY, (value) =>
+    value && typeof value === "object"
+      ? (value as Partial<CustomSizePrefs>)
+      : null
+  );
+  if (!p) return { ...DEFAULTS };
+  return {
+    widthCm:
+      typeof p.widthCm === "number" ? clamp(p.widthCm, 0.5, 30) : DEFAULTS.widthCm,
+    heightCm:
+      typeof p.heightCm === "number" ? clamp(p.heightCm, 0.5, 30) : DEFAULTS.heightCm,
+    dpi:
+      typeof p.dpi === "number" ? clamp(Math.round(p.dpi), 72, 600) : DEFAULTS.dpi,
+  };
 }
 
 export function saveCustomSize(p: CustomSizePrefs): void {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(p));
-  } catch {
-    // storage penuh / tidak tersedia — abaikan
-  }
+  saveJSON(KEY, p);
 }
 
 /** Hapus kunci localStorage milik modul ini. */
 export function clearCustomSize(): void {
-  try {
-    localStorage.removeItem(KEY);
-  } catch {
-    // abaikan
-  }
+  removeKeys(KEY);
 }

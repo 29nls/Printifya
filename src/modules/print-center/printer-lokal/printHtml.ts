@@ -1,8 +1,10 @@
 import type { PasFotoSize } from "../../photo-studio/shared/pasFotoSize";
 import {
+  computeSheetLayout,
   orientedDims,
+  sheetPageCount,
   type SheetOrientation,
-} from "../../photo-studio/shared/exportPdf";
+} from "../../photo-studio/shared/sheetLayout";
 import { getPaper, PAPER_A4, type PaperSize } from "../../photo-studio/shared/paperSize";
 
 export interface HtmlSheetOptions {
@@ -46,22 +48,18 @@ export function buildHtmlSheet(
 ): string {
   const p = getPaper(paper?.id ?? PAPER_A4.id);
   const d = orientedDims(p, orientation);
-  const gridW = size.widthMm * cols;
-  const gridH = size.heightMm * rows;
-  const marginX = Math.max(marginCm * 10, (d.widthMm - gridW) / 2);
-  const marginY = Math.max(marginCm * 10, (d.heightMm - gridH) / 2);
-  const count = cols * rows;
+  const layout = computeSheetLayout(size, cols, rows, marginCm, p, orientation);
 
   const srcs = Array.isArray(src)
     ? src
-    : Array.from({ length: count }, () => src);
-  const pages = Math.max(1, Math.ceil(srcs.length / count));
+    : Array.from({ length: layout.count }, () => src);
+  const pages = sheetPageCount(srcs.length, layout.count);
 
   const pageDivs: string[] = [];
   for (let p = 0; p < pages; p++) {
     const cells: string[] = [];
-    for (let i = 0; i < count; i++) {
-      const idx = p * count + i;
+    for (let i = 0; i < layout.count; i++) {
+      const idx = p * layout.count + i;
       const label = labels?.[idx];
       cells.push(
         idx < srcs.length
@@ -101,10 +99,10 @@ export function buildHtmlSheet(
   .page:last-child { page-break-after: auto; }
   .sheet {
     position: absolute;
-    left: ${marginX}mm;
-    top: ${marginY}mm;
-    width: ${gridW}mm;
-    height: ${gridH}mm;
+    left: ${layout.marginX}mm;
+    top: ${layout.marginY}mm;
+    width: ${layout.gridW}mm;
+    height: ${layout.gridH}mm;
     display: grid;
     grid-template-columns: repeat(${cols}, ${size.widthMm}mm);
     grid-template-rows: repeat(${rows}, ${size.heightMm}mm);

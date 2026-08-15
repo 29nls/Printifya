@@ -1,13 +1,19 @@
 /**
- * Penyimpanan opsi Background Removal ke localStorage (pola sama dengan
- * storage.ts di Template Surat): kunci ber-prefix `printifya.` dan akses
- * dibungkus try/catch (storage bisa penuh / tidak tersedia).
+ * Penyimpanan opsi Background Removal ke localStorage (via prefsStorage
+ * bersama, pola sama dengan modul AI lain): kunci ber-prefix `printifya.`
+ * dan akses dibungkus try/catch (storage bisa penuh / tidak tersedia).
  *
  * Yang disimpan:
  * - Opsi segmen (padanan rembg): post-process mask, alpha matting, erode size
  *   — dipakai sebagai nilai default pada kunjungan berikutnya.
  * - Awalan label terusan ke Auto Layout.
  */
+
+import {
+  loadJSON,
+  removeKeys,
+  saveJSON,
+} from "../../shared/prefsStorage";
 
 export interface BgSegOptions {
   postProcess: boolean;
@@ -24,26 +30,13 @@ const DEFAULTS: BgSegOptions = {
   erodeSize: 10,
 };
 
-function read<T>(key: string): T | null {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : null;
-  } catch {
-    return null;
-  }
-}
-
-function write(key: string, value: unknown): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // storage penuh / tidak tersedia — abaikan
-  }
-}
-
 /** Baca opsi segmen tersimpan (dengan fallback ke default rembg). */
 export function loadSegOptions(): BgSegOptions {
-  const p = read<Partial<BgSegOptions>>(SEG_KEY);
+  const p = loadJSON<Partial<BgSegOptions>>(SEG_KEY, (value) =>
+    value && typeof value === "object"
+      ? (value as Partial<BgSegOptions>)
+      : null
+  );
   if (!p) return { ...DEFAULTS };
   return {
     postProcess:
@@ -57,24 +50,19 @@ export function loadSegOptions(): BgSegOptions {
 }
 
 export function saveSegOptions(opts: BgSegOptions): void {
-  write(SEG_KEY, opts);
+  saveJSON(SEG_KEY, opts);
 }
 
 /** Baca awalan label tersimpan; fallback "bg-". */
 export function loadLayoutPrefix(): string {
-  return read<string>(PREFIX_KEY) ?? "bg-";
+  return loadJSON<string>(PREFIX_KEY) ?? "bg-";
 }
 
 export function saveLayoutPrefix(prefix: string): void {
-  write(PREFIX_KEY, prefix);
+  saveJSON(PREFIX_KEY, prefix);
 }
 
 /** Hapus semua kunci localStorage milik modul ini sekaligus. */
 export function clearBgOptions(): void {
-  try {
-    localStorage.removeItem(SEG_KEY);
-    localStorage.removeItem(PREFIX_KEY);
-  } catch {
-    // abaikan
-  }
+  removeKeys(SEG_KEY, PREFIX_KEY);
 }

@@ -118,3 +118,56 @@
 [2m4:21:08 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/upscale-denoise/index.tsx[22m
 [2m4:21:12 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/upscale-denoise/style.css[22m
 [2m4:24:58 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.tsx, /src/pages/Home.tsx, /src/components/ModuleOverview.tsx[22m
+[2m4:38:42 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/photo-studio/shared/A4SheetPreview.tsx[22m
+[2m4:38:47 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/photo-studio/shared/style.css[22m
+[2m4:38:56 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/auto-layout/index.tsx[22m
+[2m4:43:50 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/photo-studio/shared/style.css[22m
+[2m4:43:54 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/auto-layout/index.tsx[22m
+[2m4:44:05 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/auto-layout/index.tsx[22m
+[2m4:44:10 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/auto-layout/index.tsx[22m
+[2m4:44:26 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/auto-layout/index.tsx[22m
+[2m4:45:27 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/auto-layout/index.tsx, /src/modules/photo-studio/shared/FramePicker.tsx[22m
+[2m4:47:34 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/auto-layout/index.tsx[22m
+[2m4:50:33 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/auto-layout/index.tsx[22m
+[2m4:50:38 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/auto-layout/style.css[22m
+[2m4:54:12 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/photo-studio/shared/PasFotoWorkflow.tsx, /src/modules/ai-assistant/auto-layout/index.tsx, /src/modules/print-center/printer-lokal/index.tsx, /src/modules/document-studio/excel-sheet/index.tsx, /src/modules/document-studio/template-surat/index.tsx, /src/modules/document-studio/word-editor/index.tsx, /src/modules/print-center/pdf-export/index.tsx, /src/modules/photo-studio/shared/A4SheetPreview.tsx[22m
+[2m4:54:18 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/document-studio/excel-sheet/index.tsx, /src/modules/ai-assistant/auto-layout/index.tsx, /src/modules/print-center/printer-lokal/index.tsx, /src/modules/document-studio/template-surat/index.tsx, /src/modules/document-studio/word-editor/index.tsx, /src/modules/print-center/pdf-export/index.tsx[22m
+[2m4:54:24 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/photo-studio/shared/A4SheetPreview.tsx[22m
+[2m4:54:29 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/photo-studio/shared/style.css[22m
+[2m4:54:33 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/auto-layout/index.tsx[22m
+[2m4:54:41 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/auto-layout/index.tsx[22m
+[2m4:54:46 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/auto-layout/index.tsx[22m
+[2m5:00:37 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/auto-layout/index.tsx[22m
+[2m5:00:42 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/auto-layout/index.tsx, /src/modules/photo-studio/shared/FramePicker.tsx[22m
+[2m5:13:32 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.tsx[22m
+[2m5:13:38 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css[22m
+[2m5:15:11 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/enhance-photo/index.tsx[22m
+[2m5:15:59 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/enhance-photo/index.tsx[22m
+[2m5:20:07 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css[22m
+[2m5:22:01 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/enhance-photo/index.tsx[22m
+[2m5:22:20 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/enhance-photo/index.tsx[22m
+[2m5:22:33 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/enhance-photo/index.tsx[22m
+[2m5:29:45 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/auto-layout/index.tsx[22m
+[2m5:29:50 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/auto-layout/index.tsx, /src/modules/photo-studio/shared/FramePicker.tsx[22m
+[2m5:30:26 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/auto-layout/index.tsx, /src/modules/photo-studio/shared/FramePicker.tsx[22m
+[2m5:41:16 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/upscale-denoise/index.tsx[22m
+[2m5:41:26 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/upscale-denoise/index.tsx[22m
+[2m5:41:42 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/upscale-denoise/index.tsx[22m
+[2m5:49:26 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/upscale-denoise/index.tsx[22m
+[2m5:54:19 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/auto-crop-face/index.tsx[22m
+[2m5:54:28 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/auto-layout/index.tsx[22m
+[2m5:54:34 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/background-removal/index.tsx[22m
+[2m5:54:39 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/enhance-photo/index.tsx[22m
+[2m5:54:46 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/upscale-denoise/index.tsx[22m
+[2m5:54:51 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/document-studio/template-surat/index.tsx[22m
+[2m5:54:56 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/photo-studio/custom-size/index.tsx[22m
+[2m5:55:00 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/photo-studio/shared/PasFotoWorkflow.tsx[22m
+[2m5:55:09 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/document-studio/word-editor/index.tsx[22m
+[2m5:55:09 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/print-center/network-printer/index.tsx[22m
+[2m6:07:00 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/photo-studio/shared/PasFotoWorkflow.tsx, /src/modules/ai-assistant/auto-layout/index.tsx, /src/modules/print-center/printer-lokal/index.tsx, /src/modules/document-studio/excel-sheet/index.tsx, /src/modules/document-studio/template-surat/index.tsx, /src/modules/document-studio/word-editor/index.tsx, /src/modules/print-center/pdf-export/index.tsx, /src/modules/photo-studio/shared/A4SheetPreview.tsx[22m
+[2m6:07:07 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/document-studio/excel-sheet/index.tsx, /src/modules/ai-assistant/auto-layout/index.tsx, /src/modules/print-center/printer-lokal/index.tsx, /src/modules/document-studio/template-surat/index.tsx, /src/modules/document-studio/word-editor/index.tsx, /src/modules/print-center/pdf-export/index.tsx[22m
+[2m6:07:13 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/photo-studio/shared/A4SheetPreview.tsx[22m
+[2m6:07:16 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/print-center/pdf-export/index.tsx[22m
+[2m6:07:44 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/document-studio/excel-sheet/index.tsx, /src/modules/ai-assistant/auto-layout/index.tsx, /src/modules/print-center/printer-lokal/index.tsx, /src/modules/document-studio/template-surat/index.tsx, /src/modules/document-studio/word-editor/index.tsx, /src/modules/print-center/pdf-export/index.tsx[22m
+[2m6:07:44 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/photo-studio/shared/PasFotoWorkflow.tsx, /src/modules/ai-assistant/auto-layout/index.tsx, /src/modules/print-center/printer-lokal/index.tsx, /src/modules/print-center/pdf-export/index.tsx[22m
+[2m6:13:47 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/upscale-denoise/index.tsx[22m

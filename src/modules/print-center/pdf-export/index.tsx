@@ -5,6 +5,7 @@ import {
   fitsA4,
   maxCols,
   maxRows,
+  MIN_MARGIN_CM,
   orientedDims,
   printPasFotoPdf,
   type SheetOrientation,
@@ -24,7 +25,6 @@ const PHOTO_PRESETS = [
 type Mode = "foto" | "dokumen";
 
 const MARGIN_CM = 0.5;
-const MIN_MARGIN_CM = 0.2;
 
 function clampInt(raw: string, min: number, max: number): number {
   const n = Number(raw);
