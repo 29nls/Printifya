@@ -80,6 +80,23 @@ function roundedBorder(
   ctx.fill("evenodd");
 }
 
+/** Path persegi bulat dari (x, y) berukuran (w, h) dengan radius sudut r. */
+function roundedRectPath(
+  ctx: Ctx,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+): void {
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
 /** Garis bentuk hati (sumbu y ke bawah). */
 function heartPath(ctx: Ctx, cx: number, cy: number, s: number): void {
   ctx.beginPath();
@@ -247,7 +264,9 @@ export const FRAMES: PhotoFrame[] = [
   { id: "modern-minimal", name: "Minimal", category: "Modern", draw: (c, w, h) => border(c, w, h, tp(Math.min(w, h), 1), "#bbbbbb") },
   { id: "modern-offset", name: "Offset", category: "Modern", draw: (c, w, h) => { const m = Math.min(w, h); const thick = tp(m, 5); const thin = tp(m, 1.5); c.fillStyle = "#ffffff"; c.fillRect(0, 0, w, thick); c.fillRect(0, 0, thick, h); c.fillRect(0, h - thin, w, thin); c.fillRect(w - thin, 0, thin, h); } },
   { id: "modern-offset-dobel", name: "Offset Dobel", category: "Modern", draw: (c, w, h) => { const m = Math.min(w, h); border(c, w, h, tp(m, 5), "#ffffff"); border(c, w, h, tp(m, 1.5), "#e5e5e5", tp(m, 2)); } },
-  { id: "modern-radius", name: "Radius + Bayangan", category: "Modern", draw: (c, w, h) => { const m = Math.min(w, h); const th = tp(m, 5); const r = round(m * 0.08); c.fillStyle = "rgba(0,0,0,0.22)"; c.beginPath(); c.moveTo(r + th * 0.6, th * 0.6); c.arcTo(w, h, 0, h, r); c.arcTo(w, h, w, 0, r); c.arcTo(w, 0, 0, 0, r); c.arcTo(0, 0, 0, h, r); c.closePath(); c.fill(); roundedBorder(c, w, h, th, "#ffffff", r); } },
+  // Bayangan lembut mengikuti radius sudut yang sama: cincin rounded di dalam
+  // bingkai putih (kanvas selebar kartu, jadi bayangan jatuh ke dalam).
+  { id: "modern-radius", name: "Radius + Bayangan", category: "Modern", draw: (c, w, h) => { const m = Math.min(w, h); const th = tp(m, 5); const r = round(m * 0.08); const i2 = th * 1.6; c.fillStyle = "rgba(0,0,0,0.18)"; c.beginPath(); roundedRectPath(c, 0, 0, w, h, r); roundedRectPath(c, i2, i2, w - i2 * 2, h - i2 * 2, r); c.fill("evenodd"); roundedBorder(c, w, h, th, "#ffffff", r); } },
   { id: "modern-kaca", name: "Kaca", category: "Modern", draw: (c, w, h) => { const m = Math.min(w, h); border(c, w, h, tp(m, 2), "#ffffff"); const g = c.createLinearGradient(0, 0, w, h); g.addColorStop(0, "rgba(255,255,255,0.35)"); g.addColorStop(0.45, "rgba(255,255,255,0.02)"); g.addColorStop(0.55, "rgba(255,255,255,0)"); g.addColorStop(1, "rgba(255,255,255,0.18)"); c.fillStyle = g; c.fillRect(0, 0, w, h); } },
   { id: "modern-garis-ganda", name: "Garis Ganda", category: "Modern", draw: (c, w, h) => { const m = Math.min(w, h); border(c, w, h, 1, "#cccccc"); const o = tp(m, 3.5); c.strokeStyle = "#cccccc"; c.lineWidth = 1; c.strokeRect(o, o, w - o * 2, h - o * 2); } },
   { id: "modern-kurung", name: "Kurung Sudut", category: "Modern", draw: (c, w, h) => { const m = Math.min(w, h); c.strokeStyle = "#555555"; c.lineWidth = Math.max(2, m * 0.02); const o = tp(m, 6); const L = Math.max(6, m * 0.12); c.beginPath(); c.moveTo(o, o + L); c.lineTo(o, o); c.lineTo(o + L, o); c.moveTo(w - o - L, o); c.lineTo(w - o, o); c.lineTo(w - o, o + L); c.moveTo(o, h - o - L); c.lineTo(o, h - o); c.lineTo(o + L, h - o); c.moveTo(w - o - L, h - o); c.lineTo(w - o, h - o); c.lineTo(w - o, h - o - L); c.stroke(); } },

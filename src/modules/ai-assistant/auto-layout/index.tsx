@@ -159,7 +159,13 @@ export default function AutoLayoutPage() {
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [overIdx, setOverIdx] = useState<number | null>(null);
   // Bingkai photobox — default dari localStorage, "" = tanpa bingkai.
-  const [frameId, setFrameId] = useState(saved?.frameId ?? "");
+  // Bila id tersimpan tidak lagi cocok dengan katalog (mis. data versi lama),
+  // fallback ke "Tanpa bingkai" agar pemilih tidak kosong & framing tidak
+  // diam-diam gagal; efek persistensi di bawah ikut menimpa nilai basi itu.
+  const [frameId, setFrameId] = useState(() => {
+    const stored = saved?.frameId ?? "";
+    return stored && getFrame(stored) ? stored : "";
+  });
   const frame = getFrame(frameId);
   // Garis potong (sekat) antar sel — default AKTIF agar mudah dipotong.
   const [cutLines, setCutLines] = useState(saved?.cutLines ?? true);
