@@ -90,9 +90,10 @@ function floodFillBackground(
   const bg = new Uint8Array(w * h);
 
   const dist = (p: number, c: RGB) => {
-    const dr = data[p] - c[0];
-    const dg = data[p + 1] - c[1];
-    const db = data[p + 2] - c[2];
+    // data adalah array RGBA 4 kanal — indeks piksel p harus dikali 4.
+    const dr = data[p * 4] - c[0];
+    const dg = data[p * 4 + 1] - c[1];
+    const db = data[p * 4 + 2] - c[2];
     return Math.sqrt(dr * dr + dg * dg + db * db);
   };
 

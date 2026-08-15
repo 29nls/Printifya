@@ -419,6 +419,33 @@
   gap: 8px;
 }
 
+/* ---------- Awalan label terusan ke Auto Layout (modul AI) ---------- */
+
+.layout-prefix {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 12px 0 4px;
+}
+
+.layout-prefix input[type="text"] {
+  width: 120px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--surface);
+}
+
+.layout-prefix input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
+}
+
 /* ---------- Template cetak A4 ---------- */
 
 .sheet-section h2 {

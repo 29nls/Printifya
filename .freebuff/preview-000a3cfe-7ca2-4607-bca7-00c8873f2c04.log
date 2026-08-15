@@ -1,0 +1,19 @@
+
+  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m746[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5173[22m/[39m
+[2m  [32m➜[39m  [1mNetwork[22m[2m: use [22m[1m--host[22m[2m to expose[22m
+[2m1:53:13 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/auto-crop-face/index.tsx[22m
+[2m1:53:17 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/auto-crop-face/index.tsx[22m
+[2m1:57:01 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/auto-layout/index.tsx[22m
+[2m1:57:08 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/auto-crop-face/index.tsx[22m
+[2m2:00:50 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/background-removal/index.tsx[22m
+[2m2:00:57 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/enhance-photo/index.tsx[22m
+[2m2:04:00 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/background-removal/index.tsx[22m
+[2m2:09:05 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/auto-layout/index.tsx, /src/modules/ai-assistant/auto-crop-face/index.tsx, /src/modules/ai-assistant/background-removal/index.tsx, /src/modules/ai-assistant/enhance-photo/index.tsx[22m
+[2m2:09:10 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/auto-layout/index.tsx[22m
+[2m2:09:16 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/photo-studio/shared/PasFotoWorkflow.tsx[22m
+[2m2:11:18 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/photo-studio/shared/style.css[22m
+[2m2:11:24 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/auto-crop-face/index.tsx[22m
+[2m2:11:29 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/background-removal/index.tsx[22m
+[2m2:11:35 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/ai-assistant/enhance-photo/index.tsx[22m

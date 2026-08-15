@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import type { PasFotoSize } from "../../photo-studio/shared/pasFotoSize";
 import CropperEditor from "../../photo-studio/shared/CropperEditor";
 import { setPendingPasFoto } from "../../shared/pasFotoBridge";
+import { setPendingLayoutPhoto } from "../../shared/autoLayoutBridge";
+import { autoCropFace } from "./autocrop";
 import "../../photo-studio/shared/style.css";
 
 /** Rasio output pas foto yang didukung Auto Crop Face. */
@@ -57,7 +59,7 @@ const PRESETS: PasFotoSize[] = [
   },
 ];
 
-type Step = "upload" | "edit" | "result";
+type Step = "upload" | "edit" | "result" | "noface";
 
 export default function AutoCropFacePage() {
   const [size, setSize] = useState<PasFotoSize>(PRESETS[1]);
@@ -67,7 +69,13 @@ export default function AutoCropFacePage() {
   const [fileName, setFileName] = useState("");
   const [error, setError] = useState("");
   const [dragOver, setDragOver] = useState(false);
+  /** Proporsi wajah dalam tinggi hasil (zoom), default 50 — sama seperti autocrop. */
+  const [facePercent, setFacePercent] = useState(50);
+  /** Awalan nama default saat hasil dikirim ke Auto Layout (label lembar). */
+  const [layoutPrefix, setLayoutPrefix] = useState("auto-");
+  const [cropping, setCropping] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const autoSeq = useRef(0);
   const navigate = useNavigate();
 
   // Bersihkan object URL lama saat diganti / komponen dilepas.
@@ -77,6 +85,34 @@ export default function AutoCropFacePage() {
     };
   }, [originalUrl]);
 
+  /**
+   * Jalankan crop otomatis (pola autocrop): deteksi wajah terbesar →
+   * kotak crop terpusat dengan zoom facePercent → resize persis ukuran output.
+   * Bila wajah tidak terdeteksi, masuk step "noface" (autocrop mengembalikan
+   * hasil kosong). Hasil lama diabaikan bila ada proses auto yang lebih baru.
+   */
+  const runAuto = async (src: string, s: PasFotoSize, percent: number) => {
+    const seq = ++autoSeq.current;
+    setCropping(true);
+    setError("");
+    try {
+      const result = await autoCropFace(src, s.widthPx, s.heightPx, percent);
+      if (seq !== autoSeq.current) return;
+      if (result) {
+        setCroppedUrl(result.dataUrl);
+        setStep("result");
+      } else {
+        setStep("noface");
+      }
+    } catch (e) {
+      if (seq !== autoSeq.current) return;
+      setError(e instanceof Error ? e.message : "Gagal memproses gambar.");
+      setStep("upload");
+    } finally {
+      if (seq === autoSeq.current) setCropping(false);
+    }
+  };
+
   const handleFile = (file?: File | null) => {
     setError("");
     if (!file) return;
@@ -84,12 +120,14 @@ export default function AutoCropFacePage() {
       setError("File harus berupa gambar (JPG, PNG, atau WebP).");
       return;
     }
+    // Langsung auto-crop tanpa step manual (perilaku autocrop).
+    const url = URL.createObjectURL(file);
     setFileName(file.name);
     setOriginalUrl((prev) => {
       if (prev) URL.revokeObjectURL(prev);
-      return URL.createObjectURL(file);
+      return url;
     });
-    setStep("edit");
+    void runAuto(url, size, facePercent);
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -98,13 +136,19 @@ export default function AutoCropFacePage() {
     handleFile(e.dataTransfer.files?.[0]);
   };
 
-  /** Ganti rasio output: hasil crop lama tidak valid, ulangi crop foto asli. */
+  /** Ganti rasio output: hasil lama tidak valid, jalankan ulang auto-crop. */
   const selectSize = (s: PasFotoSize) => {
     if (s.id === size.id) return;
     setSize(s);
     setCroppedUrl(null);
     setError("");
-    setStep(originalUrl ? "edit" : "upload");
+    if (originalUrl) void runAuto(originalUrl, s, facePercent);
+    else setStep("upload");
+  };
+
+  const changeFacePercent = (percent: number) => {
+    setFacePercent(percent);
+    if (originalUrl) void runAuto(originalUrl, size, percent);
   };
 
   const download = () => {
@@ -122,6 +166,14 @@ export default function AutoCropFacePage() {
     navigate("/photo-studio/pas-foto-3x4");
   };
 
+  /** Kirim hasil ke Auto Layout untuk disusun ke lembar A4. */
+  const forwardToLayout = () => {
+    if (!croppedUrl) return;
+    const base = fileName.replace(/\.[^.]+$/, "") || size.title;
+    setPendingLayoutPhoto(croppedUrl, `${layoutPrefix}${base}`);
+    navigate("/ai-assistant/auto-layout");
+  };
+
   return (
     <div className="pas-foto-page">
       <header className="module-header">
@@ -129,8 +181,9 @@ export default function AutoCropFacePage() {
         <div>
           <h1>Auto Crop Face</h1>
           <p>
-            Deteksi wajah otomatis lalu crop dengan framing pas foto — cukup
-            upload, kotak crop langsung mengarah ke wajah.
+            Crop otomatis terpusat pada wajah terbesar — pola{" "}
+            <code>leblancfg/autocrop</code>: upload, wajah dideteksi, langsung
+            dipotong &amp; di-resize ke ukuran pas foto. Tanpa langkah manual.
           </p>
         </div>
       </header>
@@ -168,8 +221,12 @@ export default function AutoCropFacePage() {
             onDragLeave={() => setDragOver(false)}
             onDrop={handleDrop}
           >
-            <div className="upload-icon">📤</div>
-            <h3>Seret & letakkan foto di sini</h3>
+            <div className="upload-icon">{cropping ? "🔍" : "📤"}</div>
+            <h3>
+              {cropping
+                ? "Mendeteksi wajah & memotong…"
+                : "Seret & letakkan foto di sini"}
+            </h3>
             <p>atau klik untuk memilih file — JPG, PNG, atau WebP</p>
           </div>
 
@@ -187,13 +244,14 @@ export default function AutoCropFacePage() {
           {error && <p className="error">{error}</p>}
 
           <p className="hint">
-            💡 Wajah dideteksi otomatis saat editor terbuka — kotak crop
-            diposisikan dengan framing pas foto (kepala ±60% tinggi, mata di
-            sepertiga atas). Geser kotak jika perlu. Hasil akhir:{" "}
+            💡 Mengikuti <code>autocrop</code>: wajah <strong>terbesar</strong>{" "}
+            dideteksi, kotak crop dihitung terpusat pada wajah (proporsi wajah
+            diatur di bawah), dan hasil di-resize persis{" "}
             <strong>
               {size.widthPx} × {size.heightPx} px @ 300 DPI
             </strong>{" "}
-            ({size.label}).
+            ({size.label}). Bila wajah tidak terdeteksi, hasil tidak dibuat —
+            kamu bisa turun manual lewat "Edit Manual".
           </p>
         </section>
       )}
@@ -204,12 +262,35 @@ export default function AutoCropFacePage() {
           size={size}
           src={originalUrl}
           fileName={fileName}
-          onCancel={() => setStep("upload")}
+          onCancel={() => setStep(originalUrl && croppedUrl ? "result" : "upload")}
           onApply={(url) => {
             setCroppedUrl(url);
             setStep("result");
           }}
         />
+      )}
+
+      {step === "noface" && (
+        <section className="panel">
+          <h2>😕 Wajah tidak terdeteksi</h2>
+          <p style={{ color: "var(--text-muted)", lineHeight: 1.7 }}>
+            Seperti <code>autocrop</code>, hasil tidak dibuat bila tidak ada
+            wajah yang ditemukan. Kamu bisa memotong secara manual, atau coba
+            foto lain dengan latar lebih kontras dan wajah menghadap kamera.
+          </p>
+          <div className="result-actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => setStep("edit")}
+            >
+              ✏️ Edit Manual
+            </button>
+            <button type="button" className="btn" onClick={() => setStep("upload")}>
+              🔄 Foto Lain
+            </button>
+          </div>
+        </section>
       )}
 
       {step === "result" && croppedUrl && (
@@ -251,7 +332,49 @@ export default function AutoCropFacePage() {
                   <span>Format</span>
                   <strong>PNG</strong>
                 </li>
+                <li>
+                  <span>Proporsi wajah</span>
+                  <strong>{facePercent}%</strong>
+                </li>
               </ul>
+
+              {/* Proporsi wajah = zoom autocrop (--facePercent). */}
+              <div className="sheet-settings">
+                <label>
+                  🔍 Proporsi wajah di hasil (zoom)
+                  <input
+                    type="range"
+                    min={1}
+                    max={100}
+                    value={facePercent}
+                    onChange={(e) => changeFacePercent(Number(e.target.value))}
+                    style={{ width: 220 }}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => originalUrl && runAuto(originalUrl, size, facePercent)}
+                  disabled={cropping}
+                >
+                  ✨ Auto Crop Ulang
+                </button>
+              </div>
+              <p className="hint">
+                Nilai 50% = wajah mengisi separuh tinggi hasil (default{" "}
+                <code>autocrop</code>); makin besar, makin dekat (zoom in).
+                Crop otomatis dihitung ulang setiap slider digeser.
+              </p>
+
+              <label className="layout-prefix">
+                🧩 Awalan label di lembar Auto Layout
+                <input
+                  type="text"
+                  value={layoutPrefix}
+                  placeholder="mis. auto-"
+                  onChange={(e) => setLayoutPrefix(e.target.value)}
+                />
+              </label>
 
               <div className="result-actions">
                 <button
@@ -260,6 +383,13 @@ export default function AutoCropFacePage() {
                   onClick={forwardToPasFoto}
                 >
                   🪪 Jadikan Pas Foto 3x4
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={forwardToLayout}
+                >
+                  🧩 Susun ke Lembar A4
                 </button>
                 <button
                   type="button"
@@ -273,7 +403,7 @@ export default function AutoCropFacePage() {
                   className="btn"
                   onClick={() => setStep("edit")}
                 >
-                  ✏️ Edit Ulang
+                  ✏️ Edit Manual
                 </button>
                 <button
                   type="button"

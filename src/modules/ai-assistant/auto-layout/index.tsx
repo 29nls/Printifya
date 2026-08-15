@@ -13,6 +13,10 @@ import {
   printHtmlSheet,
 } from "../../print-center/printer-lokal/printHtml";
 import { setPendingPasFoto } from "../../shared/pasFotoBridge";
+import {
+  clearPendingLayoutPhotos,
+  peekPendingLayoutPhotos,
+} from "../../shared/autoLayoutBridge";
 import "../../photo-studio/shared/style.css";
 import "./style.css";
 
@@ -84,7 +88,18 @@ interface PhotoItem {
 
 export default function AutoLayoutPage() {
   const [size, setSize] = useState<PasFotoSize>(PRESETS[1]);
-  const [photos, setPhotos] = useState<PhotoItem[]>([]);
+  // Bila datang dari modul lain (mis. Auto Crop Face / Background Removal /
+  // pas foto beberapa orang), langsung masukkan foto-foto tersebut ke daftar.
+  // peek (bukan take) agar aman terhadap double-mount React StrictMode;
+  // dikosongkan setelah commit di bawah — pola sama dengan pasFotoBridge.
+  const [photos, setPhotos] = useState<PhotoItem[]>(() => {
+    const pending = peekPendingLayoutPhotos();
+    return pending ? pending.map((p) => ({ url: p.url, name: p.name })) : [];
+  });
+
+  useEffect(() => {
+    clearPendingLayoutPhotos();
+  }, []);
   const [error, setError] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const [cols, setCols] = useState(maxCols(PRESETS[1], DEFAULT_MARGIN_CM));

@@ -5,6 +5,7 @@ import {
   removeBackground,
 } from "./bgRemove";
 import { setPendingPasFoto } from "../../shared/pasFotoBridge";
+import { setPendingLayoutPhoto } from "../../shared/autoLayoutBridge";
 import "../../photo-studio/shared/style.css";
 import "./style.css";
 
@@ -34,6 +35,8 @@ export default function BackgroundRemovalPage() {
   const [processing, setProcessing] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [bgId, setBgId] = useState<string>("transparent");
+  /** Awalan nama default saat hasil dikirim ke Auto Layout (label lembar). */
+  const [layoutPrefix, setLayoutPrefix] = useState("bg-");
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   // Kanvas hasil transparan (sumber untuk pewarnaan ulang tanpa reproses).
@@ -116,6 +119,14 @@ export default function BackgroundRemovalPage() {
     if (!resultUrl) return;
     setPendingPasFoto(resultUrl);
     navigate("/photo-studio/pas-foto-3x4");
+  };
+
+  /** Kirim hasil (dengan warna latar terpilih) ke Auto Layout untuk lembar A4. */
+  const forwardToLayout = () => {
+    if (!resultUrl) return;
+    const base = fileName.replace(/\.[^.]+$/, "") || "background-removed";
+    setPendingLayoutPhoto(resultUrl, `${layoutPrefix}${base}`);
+    navigate("/ai-assistant/auto-layout");
   };
 
   return (
@@ -269,6 +280,16 @@ export default function BackgroundRemovalPage() {
 
             {warning && <p className="error">{warning}</p>}
 
+            <label className="layout-prefix">
+              🧩 Awalan label di lembar Auto Layout
+              <input
+                type="text"
+                value={layoutPrefix}
+                placeholder="mis. bg-"
+                onChange={(e) => setLayoutPrefix(e.target.value)}
+              />
+            </label>
+
             <div className="result-actions">
               <button
                 type="button"
@@ -276,6 +297,13 @@ export default function BackgroundRemovalPage() {
                 onClick={forwardToPasFoto}
               >
                 🪪 Jadikan Pas Foto 3x4
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={forwardToLayout}
+              >
+                🧩 Susun ke Lembar A4
               </button>
               <button
                 type="button"

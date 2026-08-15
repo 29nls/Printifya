@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   computeAutoParams,
   enhanceImage,
   NEUTRAL_PARAMS,
   type EnhanceParams,
 } from "./enhance";
+import { setPendingLayoutPhoto } from "../../shared/autoLayoutBridge";
 import "../../photo-studio/shared/style.css";
 import "./style.css";
 
@@ -32,7 +34,10 @@ export default function EnhancePhotoPage() {
   const [preview, setPreview] = useState<HTMLCanvasElement | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
   const [autoApplied, setAutoApplied] = useState(false);
+  /** Awalan nama default saat hasil dikirim ke Auto Layout (label lembar). */
+  const [layoutPrefix, setLayoutPrefix] = useState("enhanced-");
   const inputRef = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
 
   // Pratinjau live dengan debounce singkat saat slider digeser.
   useEffect(() => {
@@ -106,6 +111,15 @@ export default function EnhancePhotoPage() {
     a.href = full.toDataURL("image/png");
     a.download = "enhanced-photo.png";
     a.click();
+  };
+
+  /** Kirim hasil enhance (resolusi penuh) ke Auto Layout untuk lembar A4. */
+  const forwardToLayout = () => {
+    if (!img) return;
+    const full = enhanceImage(img, params);
+    const base = fileName.replace(/\.[^.]+$/, "") || "enhanced-photo";
+    setPendingLayoutPhoto(full.toDataURL("image/png"), `${layoutPrefix}${base}`);
+    navigate("/ai-assistant/auto-layout");
   };
 
   return (
@@ -265,9 +279,26 @@ export default function EnhancePhotoPage() {
               </figure>
             </div>
 
+            <label className="layout-prefix">
+              🧩 Awalan label di lembar Auto Layout
+              <input
+                type="text"
+                value={layoutPrefix}
+                placeholder="mis. enhanced-"
+                onChange={(e) => setLayoutPrefix(e.target.value)}
+              />
+            </label>
+
             <div className="result-actions">
               <button type="button" className="btn btn-primary" onClick={download}>
                 ⬇️ Unduh PNG (ukuran penuh)
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={forwardToLayout}
+              >
+                🧩 Susun ke Lembar A4
               </button>
             </div>
           </section>

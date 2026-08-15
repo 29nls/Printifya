@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { setPendingPasFoto } from "../../shared/pasFotoBridge";
+import {
+  setPendingLayoutPhoto,
+  setPendingLayoutPhotos,
+} from "../../shared/autoLayoutBridge";
 import type { PasFotoSize } from "./pasFotoSize";
 import CropperEditor from "./CropperEditor";
 import A4SheetPreview from "./A4SheetPreview";
@@ -241,6 +245,22 @@ export default function PasFotoWorkflow({
     navigate("/photo-studio/pas-foto-3x4");
   };
 
+  /**
+   * Kirim ke Auto Layout: satu orang → satu foto; beberapa orang → seluruh
+   * daftar sekaligus (nama tiap orang ikut sebagai label lembar).
+   */
+  const forwardToLayout = () => {
+    if (!croppedUrl) return;
+    if (people.length > 1) {
+      setPendingLayoutPhotos(
+        people.map((p) => ({ url: p.url, name: p.name }))
+      );
+    } else {
+      setPendingLayoutPhoto(croppedUrl, people[0]?.name ?? activeSize.title);
+    }
+    navigate("/ai-assistant/auto-layout");
+  };
+
   const handleExportPdf = async () => {
     if (!croppedUrl || !canExport || exporting) return;
     setError("");
@@ -468,6 +488,18 @@ export default function PasFotoWorkflow({
                     🪪 Jadikan Pas Foto 3x4
                   </button>
                 )}
+                <button
+                  type="button"
+                  className="btn"
+                  title={
+                    people.length > 1
+                      ? `Kirim ${people.length} orang sekaligus ke Auto Layout`
+                      : "Kirim foto ini ke Auto Layout"
+                  }
+                  onClick={forwardToLayout}
+                >
+                  🧩 Susun ke Lembar A4
+                </button>
                 <button type="button" className="btn btn-primary" onClick={() => setStep("upload")}>
                   ➕ Crop Orang Lain
                 </button>
