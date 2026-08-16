@@ -1,6 +1,33 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { comparePixels, comparePipelines } from "./qualityCompare";
+import {
+  comparePixels,
+  comparePipelines,
+  runFramePipeline,
+} from "./qualityCompare";
+import { processFramePixels } from "../video-face-enhance/videoEnhance";
 import { NEUTRAL_PARAMS, type FaceEnhanceParams } from "./faceEnhance";
+
+// Spy pada processFramePixels (delegasi ke implementasi asli agar semua test
+// lain tetap berperilaku identik) — membuktikan runFramePipeline mendelegasi
+// penuh ke sumber tunggal jalur video, bukan menyalin pipeline.
+vi.mock("../video-face-enhance/videoEnhance", async (importOriginal) => {
+  const mod = await importOriginal<
+    typeof import("../video-face-enhance/videoEnhance")
+  >();
+  return {
+    ...mod,
+    processFramePixels: vi.fn(
+      (
+        data: Uint8ClampedArray,
+        w: number,
+        h: number,
+        params: FaceEnhanceParams,
+        temporal: number,
+        prev: Uint8ClampedArray | null
+      ) => mod.processFramePixels(data, w, h, params, temporal, prev)
+    ),
+  };
+});
 
 describe("comparePixels — metrik perbedaan dua buffer RGBA", () => {
   /** Buffer 4×4 abu-abu (RGB 120/130/140, alpha 255). */
@@ -101,7 +128,7 @@ describe("comparePipelines — Face Enhance vs Video Face Enhance pada frame sam
       canvases.push(c);
       return c;
     }) as unknown as ReturnType<typeof vi.fn>;
-    return { createElement, drawImage, putImageData, getImageData, canvases };
+    return { createElement, drawImage, putImageData, getImageData, canvases, data };
   }
 
   class MockImageData {
@@ -120,7 +147,6 @@ describe("comparePipelines — Face Enhance vs Video Face Enhance pada frame sam
     h = makeCanvasMock();
     vi.stubGlobal("document", { createElement: h.createElement });
     vi.stubGlobal("ImageData", MockImageData);
-    vi.stubGlobal("HTMLImageElement", class {});
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -163,11 +189,34 @@ describe("comparePipelines — Face Enhance vs Video Face Enhance pada frame sam
     expect(res.metrics!.pctChanged).toBeGreaterThan(0);
   });
 
-  it("kedua pipeline mendeteksi pada kanvas kerjanya sendiri (frame tergambar, belum dipulihkan) — deteksi berjalan untuk keduanya", () => {
+  it("tiap pipeline membaca frame kerja sekali — deteksi berjalan murni di dalam processFramePixels (tanpa kanvas deteksi)", () => {
+    const spy = vi.mocked(processFramePixels);
+    spy.mockClear();
     const res = comparePipelines(SRC, NEUTRAL_PARAMS, NEUTRAL_PARAMS, 32, 32);
-    // detectFace dipanggil dua kali (satu per pipeline) — tiap pipeline:
-    // getImageData kanvas kerja + getImageData kanvas deteksi.
-    expect(h.getImageData.mock.calls.length).toBeGreaterThanOrEqual(4);
+    // Satu getImageData per pipeline (frame kerja); deteksi tidak membuat
+    // kanvas/read tambahan seperti detectFace(canvas) dulu.
+    expect(h.getImageData.mock.calls.length).toBe(2);
+    expect(spy).toHaveBeenCalledTimes(2);
+    for (const call of spy.mock.calls) {
+      expect(call[4]).toBe(0); // temporal = 0 → temporalBlend identitas
+      expect(call[5]).toBeNull(); // prev = null
+    }
     expect(res.metrics!.psnr).toBe(Infinity);
+  });
+
+  it("runFramePipeline ≡ processFramePixels: delegasi penuh (piksel frame persis, temporal 0, prev null), output mengalir dari sana", () => {
+    const P: FaceEnhanceParams = { ...NEUTRAL_PARAMS, fidelity: 40 };
+    const spy = vi.mocked(processFramePixels);
+    spy.mockClear();
+    const res = runFramePipeline(SRC, P, 32, 32);
+    expect(spy).toHaveBeenCalledTimes(1);
+    // Piksel yang dikirim = persis hasil getImageData kanvas kerja, bukan salinan.
+    expect(spy).toHaveBeenCalledWith(h.data, 32, 32, P, 0, null);
+    const inner = spy.mock.results[0]!.value;
+    // data & faceDetected = persis kembalian processFramePixels (bukan
+    // pipeline kedua/duplikat) — perbandingan tidak bisa melenceng diam-diam.
+    expect(res.data).toBe(inner.out);
+    expect(res.faceDetected).toBe(inner.faceDetected);
+    expect(res.canvas.width).toBe(32);
   });
 });
