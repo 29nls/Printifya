@@ -41,6 +41,35 @@ export interface VideoEnhanceParams extends FaceEnhanceParams {
   resMode: "512" | "720" | "orig";
   /** Wadah output video: "webm" | "mp4" (bila didukung browser). */
   format: "webm" | "mp4";
+  /** Sampling frame: proses semua / setengah / sepertiga frame sumber —
+   *  mempercepat video panjang dengan trade-off kehalusan gerak (tiap frame
+   *  hasil ditahan beberapa slot output, durasi & fps tetap sama). */
+  frameSampling: FrameSampling;
+}
+
+/** Opsi sampling frame: "all" (semua) | "half" (setengah) | "third" (sepertiga). */
+export type FrameSampling = "all" | "half" | "third";
+export const FRAME_SAMPLING: readonly FrameSampling[] = [
+  "all",
+  "half",
+  "third",
+];
+
+/** Faktor sampling: 1 = semua, 2 = setengah, 3 = sepertiga. */
+export function samplingFactor(sampling: FrameSampling): number {
+  return sampling === "half" ? 2 : sampling === "third" ? 3 : 1;
+}
+
+/** Jumlah frame yang benar-benar diproses untuk `total` slot output (fps
+ *  penuh); minimal 1 (video sangat pendek tetap diproses). */
+export function sampledFrames(total: number, sampling: FrameSampling): number {
+  return Math.max(1, Math.ceil(total / samplingFactor(sampling)));
+}
+
+/** Indeks buffer frame terproses untuk slot output ke-`i` (tiap frame hasil
+ *  ditahan `samplingFactor` slot — durasi output ≈ sumber). */
+export function sampledBufferIndex(i: number, sampling: FrameSampling): number {
+  return Math.floor(i / samplingFactor(sampling));
 }
 
 export const DEFAULT_VIDEO_PARAMS: VideoEnhanceParams = {
@@ -49,6 +78,7 @@ export const DEFAULT_VIDEO_PARAMS: VideoEnhanceParams = {
   fps: 15,
   resMode: "720",
   format: "webm",
+  frameSampling: "all",
 };
 
 export const FPS_OPTIONS = [10, 15, 24, 30] as const;

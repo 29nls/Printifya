@@ -9,9 +9,14 @@ import {
   DEFAULT_VIDEO_PARAMS,
   FPS_OPTIONS,
   FORMATS,
+  FRAME_SAMPLING,
   pickWorkingSize,
   processFramePixels,
   RES_MODES,
+  sampledBufferIndex,
+  sampledFrames,
+  samplingFactor,
+  type FrameSampling,
   type VideoEnhanceParams,
 } from "./videoEnhance";
 import type {
@@ -454,6 +459,12 @@ export default function VideoFaceEnhancePage() {
       setError("Durasi video tidak valid.");
       return;
     }
+    // Sampling frame: proses sebagian frame (semua/setengah/sepertiga) untuk
+    // video panjang — tiap frame hasil ditahan beberapa slot output, jadi
+    // durasi & fps hasil tetap sama, hanya kehalusan gerak berkurang.
+    const sampling = params.frameSampling;
+    const sf = samplingFactor(sampling);
+    const processTotal = sampledFrames(total, sampling);
     if (typeof MediaRecorder === "undefined") {
       setError("Browser tidak mendukung perekaman video (MediaRecorder).");
       return;
@@ -501,10 +512,10 @@ export default function VideoFaceEnhancePage() {
     };
 
     const frameBytes = w * h * 4;
-    const canPrerender = total * frameBytes <= 180 * 1024 * 1024;
+    const canPrerender = processTotal * frameBytes <= 180 * 1024 * 1024;
     cancelledRef.current = false;
     setProcessing(true);
-    setProgress({ done: 0, total });
+    setProgress({ done: 0, total: processTotal });
     // Frame hasil sebelumnya — hanya dipakai fallback thread utama (di worker,
     // prev dipegang worker dan di-reset via pesan "reset").
     let prev: Uint8ClampedArray | null = null;
@@ -572,20 +583,24 @@ export default function VideoFaceEnhancePage() {
     let recorder: AudioRecorder | null = null;
     try {
       if (canPrerender) {
-        // Fase 1: proses semua frame ke buffer (recorder BELUM mulai — tidak
-        // ada kanvas kosong yang ikut terekam).
+        // Fase 1: proses frame terpilih (setiap `sf`-slot) ke buffer (recorder
+        // BELUM mulai — tidak ada kanvas kosong yang ikut terekam).
         const buffers: Uint8ClampedArray[] = [];
-        for (let i = 0; i < total; i++) {
+        for (let j = 0; j < processTotal; j++) {
           if (cancelledRef.current) break;
-          const out = await processOne(i);
+          const out = await processOne(j * sf);
           if (out) buffers.push(out);
-          setProgress({ done: i + 1, total });
-          if (i % 3 === 2) await new Promise((r) => setTimeout(r, 0));
+          setProgress({ done: j + 1, total: processTotal });
+          if (j % 3 === 2) await new Promise((r) => setTimeout(r, 0));
         }
         // Fase 2: mulai rekam, lalu putImageData buffer pada jadwal fps yang
-        // tepat (putImageData jauh lebih cepat daripada drawImage+enhance,
-        // jadi fase ini selalu mengikuti waktu nyata → durasi ≈ sumber).
-        if (!cancelledRef.current && buffers.length === total) {
+        // tepat — tiap frame hasil ditahan `sf` slot berturut-turut (durasi
+        // output ≈ sumber; kehalusan gerak berkurang sesuai sampling).
+        // putImageData jauh lebih cepat daripada drawImage+enhance, jadi fase
+        // ini selalu mengikuti waktu nyata. Audio diputar ulang dari buffer via
+        // BufferSource → destination agar track audio asli mengalir (video
+        // sumber tetap pause).
+        if (!cancelledRef.current && buffers.length === processTotal) {
           recorder = startRecorder();
           const t0 = performance.now();
           const interval = 1000 / params.fps;
@@ -593,13 +608,14 @@ export default function VideoFaceEnhancePage() {
             if (cancelledRef.current) break;
             const wait = t0 + i * interval - performance.now();
             if (wait > 1) await sleep(wait);
+            const idx = Math.min(processTotal - 1, sampledBufferIndex(i, sampling));
             ctx.putImageData(
-              new ImageData(new Uint8ClampedArray(buffers[i]), w, h),
+              new ImageData(new Uint8ClampedArray(buffers[idx]), w, h),
               0,
               0
             );
             if (i % 5 === 4 || i === total - 1) {
-              setProgress({ done: i + 1, total });
+              setProgress({ done: idx + 1, total: processTotal });
             }
           }
         }
@@ -609,18 +625,23 @@ export default function VideoFaceEnhancePage() {
         recorder = startRecorder();
         const t0 = performance.now();
         const interval = 1000 / params.fps;
-        for (let i = 0; i < total; i++) {
+        for (let j = 0; j < processTotal; j++) {
           if (cancelledRef.current) break;
-          const wait = t0 + i * interval - performance.now();
-          if (wait > 1) await sleep(wait);
-          const out = await processOne(i);
+          const out = await processOne(j * sf);
           if (!out) break;
-          ctx.putImageData(
-            new ImageData(new Uint8ClampedArray(out), w, h),
-            0,
-            0
-          );
-          setProgress({ done: i + 1, total });
+          // Tahan frame hasil selama `sf` slot output (durasi tetap ≈ sumber).
+          for (let k = 0; k < sf; k++) {
+            const i = j * sf + k;
+            if (i >= total) break;
+            const wait = t0 + i * interval - performance.now();
+            if (wait > 1) await sleep(wait);
+            ctx.putImageData(
+              new ImageData(new Uint8ClampedArray(out), w, h),
+              0,
+              0
+            );
+          }
+          setProgress({ done: j + 1, total: processTotal });
         }
       }
     } catch (e) {
@@ -1101,6 +1122,31 @@ export default function VideoFaceEnhancePage() {
                     ))}
                   </select>
                 </label>
+                <label
+                  title="Proses sebagian frame untuk video panjang: tiap frame hasil ditahan beberapa slot output, jadi durasi & FPS tetap sama — hanya kehalusan gerak berkurang."
+                >
+                  Sampling frame
+                  <select
+                    className="tool-select"
+                    value={params.frameSampling}
+                    onChange={(e) =>
+                      setParams((p) => ({
+                        ...p,
+                        frameSampling: e.target.value as FrameSampling,
+                      }))
+                    }
+                  >
+                    {FRAME_SAMPLING.map((s) => (
+                      <option key={s} value={s}>
+                        {s === "all"
+                          ? "Semua (paling halus)"
+                          : s === "half"
+                            ? "Setengah (2× lebih cepat)"
+                            : "Sepertiga (3× lebih cepat)"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
 
               {processing && progress && (
@@ -1124,8 +1170,11 @@ export default function VideoFaceEnhancePage() {
               💡 PGTFormer beroperasi di resolusi 512 — pilih "512 px (PGTFormer)"
               untuk perilaku paling dekat dengan repo asli; 720 px/Asli
               menghasilkan video lebih tajam tapi lebih lambat. Frame yang
-              diproses = durasi × FPS; turunkan FPS untuk video panjang. Durasi
-              hasil ≈ durasi sumber (frame diproses
+              diproses = durasi × FPS; turunkan FPS untuk video panjang.
+              **Sampling frame** memproses setengah/sepertiga frame untuk video
+              panjang (2×/3× lebih cepat): tiap frame hasil ditahan beberapa
+              slot output, jadi durasi & FPS hasil tetap sama — hanya kehalusan
+              gerak berkurang. Durasi hasil ≈ durasi sumber (frame diproses
               dulu, lalu direkam ulang pada jadwal FPS); untuk video sangat
               panjang perekaman berjalan langsung dan durasi bisa sedikit lebih
               panjang. Track audio sumber dipertahankan: audio di-decode sekali
@@ -1207,9 +1256,9 @@ export default function VideoFaceEnhancePage() {
                 }
               >
                 {faceFrames > 0
-                  ? `😀 Wajah terdeteksi di ${faceFrames} dari ${countFrames(
-                      meta.duration,
-                      params.fps
+                  ? `😀 Wajah terdeteksi di ${faceFrames} dari ${sampledFrames(
+                      countFrames(meta.duration, params.fps),
+                      params.frameSampling
                     )} frame — pemulihan difokuskan ke area wajah per frame (parsing-guided) dengan koherensi temporal ${params.temporal}.`
                   : "😕 Wajah tidak terdeteksi di frame mana pun — koreksi warna & ketajaman ringan diterapkan ke seluruh frame."}
               </p>

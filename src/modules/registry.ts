@@ -260,7 +260,7 @@ export const MODULES: Module[] = [
         path: "/ai-assistant/video-face-enhance",
         icon: "🎥",
         description:
-          "Pulihkan kualitas wajah pada video (gaya PGTFormer, IJCAI'24): pemulihan wajah per frame (parsing-guided) dengan koherensi temporal tanpa pre-alignment, ekspor WebM/MP4 dengan track audio sumber dipertahankan (WebAudio → MediaStreamDestination), terusan frame ke pas foto & Auto Layout — preferensi tersimpan dengan tombol reset.",
+          "Pulihkan kualitas wajah pada video (gaya PGTFormer, IJCAI'24): pemulihan wajah per frame (parsing-guided) dengan koherensi temporal tanpa pre-alignment, pipeline per-frame berjalan di Web Worker (UI tetap responsif untuk video panjang; fallback thread utama), sampling frame (semua/setengah/sepertiga — 2×/3× lebih cepat, durasi tetap), ekspor WebM/MP4 dengan track audio sumber dipertahankan (WebAudio → MediaStreamDestination) + indikator mini waveform audio terbaca, bandingkan audio sebelum/sesudah via dua pemutar yang sinkron (Putar Keduanya) dengan tombol mute eksplisit, terusan frame ke pas foto & Auto Layout — preferensi tersimpan dengan tombol reset.",
         Component: VideoFaceEnhancePage,
       },
     ],

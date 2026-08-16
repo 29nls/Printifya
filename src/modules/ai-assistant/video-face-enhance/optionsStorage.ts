@@ -13,6 +13,7 @@ import { loadJSON, removeKeys, saveJSON } from "../../shared/prefsStorage";
 import {
   DEFAULT_VIDEO_PARAMS,
   FPS_OPTIONS,
+  FRAME_SAMPLING,
   RES_MODES,
   FORMATS,
   type VideoEnhanceParams,
@@ -64,6 +65,11 @@ export function loadVideoPrefs(): VideoFaceEnhancePrefs {
             : DEFAULT_VIDEO_PARAMS.fps,
         resMode: oneOf(f.resMode, RES_MODES, DEFAULT_VIDEO_PARAMS.resMode),
         format: oneOf(f.format, FORMATS, DEFAULT_VIDEO_PARAMS.format),
+        frameSampling: oneOf(
+          f.frameSampling,
+          FRAME_SAMPLING,
+          DEFAULT_VIDEO_PARAMS.frameSampling
+        ),
       },
       layoutPrefix:
         typeof p.layoutPrefix === "string"

@@ -5,6 +5,10 @@ import {
   DEFAULT_VIDEO_PARAMS,
   pickWorkingSize,
   processFramePixels,
+  FRAME_SAMPLING,
+  sampledBufferIndex,
+  sampledFrames,
+  samplingFactor,
   temporalBlend,
 } from "./videoEnhance";
 import { NEUTRAL_PARAMS } from "../face-enhance/faceEnhance";
@@ -225,6 +229,43 @@ describe("processFramePixels — pipeline per-frame (sumber tunggal worker/utama
   });
 });
 
+describe("sampling frame — proses sebagian frame, durasi output tetap", () => {
+  it("faktor: all=1, half=2, third=3", () => {
+    expect(samplingFactor("all")).toBe(1);
+    expect(samplingFactor("half")).toBe(2);
+    expect(samplingFactor("third")).toBe(3);
+  });
+
+  it("sampledFrames: 60 slot → 60/30/20 frame diproses", () => {
+    expect(sampledFrames(60, "all")).toBe(60);
+    expect(sampledFrames(60, "half")).toBe(30);
+    expect(sampledFrames(60, "third")).toBe(20);
+  });
+
+  it("video sangat pendek → minimal 1 frame diproses", () => {
+    expect(sampledFrames(2, "third")).toBe(1);
+    expect(sampledFrames(1, "half")).toBe(1);
+  });
+
+  it("sampledBufferIndex: tiap frame hasil ditahan `sf` slot berturut-turut", () => {
+    // half: slot 0,1 → frame 0; slot 2,3 → frame 1; dst.
+    expect([0, 1, 2, 3, 4, 5].map((i) => sampledBufferIndex(i, "half"))).toEqual([
+      0, 0, 1, 1, 2, 2,
+    ]);
+    // third: slot 0,1,2 → frame 0; 3,4,5 → frame 1.
+    expect([0, 1, 2, 3, 4, 5].map((i) => sampledBufferIndex(i, "third"))).toEqual([
+      0, 0, 0, 1, 1, 1,
+    ]);
+    // all: identitas.
+    expect(sampledBufferIndex(3, "all")).toBe(3);
+  });
+
+  it("FRAME_SAMPLING memuat ketiga opsi; default params = all", () => {
+    expect(FRAME_SAMPLING).toEqual(["all", "half", "third"]);
+    expect(DEFAULT_VIDEO_PARAMS.frameSampling).toBe("all");
+  });
+});
+
 describe("DEFAULT_VIDEO_PARAMS — default yang masuk akal", () => {
   it("melengkapi default face-enhance dengan opsi video", () => {
     expect(DEFAULT_VIDEO_PARAMS.fidelity).toBeGreaterThanOrEqual(0);
@@ -232,6 +273,7 @@ describe("DEFAULT_VIDEO_PARAMS — default yang masuk akal", () => {
     expect(DEFAULT_VIDEO_PARAMS.temporal).toBeLessThanOrEqual(100);
     expect([10, 15, 24, 30]).toContain(DEFAULT_VIDEO_PARAMS.fps);
     expect(["512", "720", "orig"]).toContain(DEFAULT_VIDEO_PARAMS.resMode);
+    expect(FRAME_SAMPLING).toContain(DEFAULT_VIDEO_PARAMS.frameSampling);
   });
 });
 
