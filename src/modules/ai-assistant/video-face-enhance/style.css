@@ -31,6 +31,18 @@
   width: 170px;
 }
 
+/* Kontrol pemutaran banding sebelum/sesudah (putar sinkron + mute eksplisit). */
+.compare-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.compare-hint {
+  margin-top: 0;
+}
+
 /* Indikator waveform audio sumber (mini SVG di samping badge 🔊). */
 .file-title {
   display: inline-flex;

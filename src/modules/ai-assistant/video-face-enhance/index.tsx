@@ -135,6 +135,9 @@ export default function VideoFaceEnhancePage() {
   const [faceFrames, setFaceFrames] = useState(0);
   // null = belum diketahui, true/false = video sumber punya/tanpa audio.
   const [hasAudio, setHasAudio] = useState<boolean | null>(null);
+  // Bisukan kedua pemutar banding (tombol mute eksplisit) — default suara
+  // menyala karena pemutaran dipicu gestur klik (autoplay diizinkan).
+  const [compareMuted, setCompareMuted] = useState(false);
   // Status decode audio untuk indikator waveform: idle/decoding/ready/failed.
   const [audioStatus, setAudioStatus] = useState<
     "idle" | "decoding" | "ready" | "failed"
@@ -145,6 +148,12 @@ export default function VideoFaceEnhancePage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileTokenRef = useRef(0);
   const resultVideoRef = useRef<HTMLVideoElement>(null);
+  // Video sumber di panel banding sebelum/sesudah (elemen TERPISAH dari
+  // videoRef tersembunyi — yang TIDAK boleh diputar agar drawImage tidak
+  // men-taint canvas).
+  const srcVideoRef = useRef<HTMLVideoElement>(null);
+  // Loop sinkronisasi rAF pemutaran banding (null = tidak berjalan).
+  const syncLoopRef = useRef<number | null>(null);
   const cancelledRef = useRef(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
   // Audio sumber: AudioContext + buffer PCM hasil decode (sekali per video).
@@ -189,6 +198,7 @@ export default function VideoFaceEnhancePage() {
         audioBufferRef.current = null;
       }
       audioPromiseRef.current = null;
+      stopSyncLoop();
       const { videoUrl: vUrl, resultUrl: rUrl } = urlsRef.current;
       if (vUrl) URL.revokeObjectURL(vUrl);
       if (rUrl) URL.revokeObjectURL(rUrl);
@@ -633,6 +643,79 @@ export default function VideoFaceEnhancePage() {
     cancelledRef.current = true;
   };
 
+  /** Hentikan loop sinkronisasi pemutaran banding (rAF). */
+  function stopSyncLoop() {
+    if (syncLoopRef.current !== null) {
+      cancelAnimationFrame(syncLoopRef.current);
+      syncLoopRef.current = null;
+    }
+  }
+
+  /** Jeda kedua pemutar banding dan hentikan loop sinkronisasi. */
+  function stopBoth() {
+    stopSyncLoop();
+    try {
+      srcVideoRef.current?.pause();
+      resultVideoRef.current?.pause();
+    } catch {
+      // abaikan
+    }
+  }
+
+  /**
+   * Putar video sumber & hasil BERSAMAAN dari 0 (perbandingan audio/video A/B
+   * yang sinkron). Dipicu gestur klik → autoplay dengan suara diizinkan
+   * browser. Selama berjalan, loop rAF menjaga kedua pemutar sejajar (drift
+   * > 0,12 dtk di-seek ulang, master = sumber); bila salah satu jeda/berakhir,
+   * keduanya berhenti.
+   */
+  function playBothSync() {
+    const src = srcVideoRef.current;
+    const res = resultVideoRef.current;
+    if (!src || !res) return;
+    stopSyncLoop();
+    try {
+      src.currentTime = 0;
+      res.currentTime = 0;
+    } catch {
+      // abaikan
+    }
+    void Promise.allSettled([src.play(), res.play()]);
+    const tick = () => {
+      if (!src || !res) return;
+      // Keduanya berhenti (pengguna menguasai pemutaran) → lepas sinkronisasi.
+      if (src.paused && res.paused) {
+        stopSyncLoop();
+        return;
+      }
+      // Salah satu dijeda → jeda pasangannya agar tetap sinkron.
+      if (src.paused !== res.paused) {
+        if (src.paused) res.pause();
+        else src.pause();
+      }
+      if (!src.paused && !res.paused) {
+        const drift = src.currentTime - res.currentTime;
+        if (Math.abs(drift) > 0.12) {
+          res.currentTime = src.currentTime; // master = sumber
+        }
+      }
+      if (src.ended || res.ended) {
+        stopBoth();
+        return;
+      }
+      syncLoopRef.current = requestAnimationFrame(tick);
+    };
+    syncLoopRef.current = requestAnimationFrame(tick);
+  }
+
+  /** Tombol mute eksplisit: bisukan/suarakan kedua pemutar banding sekaligus. */
+  function toggleMute() {
+    const next = !compareMuted;
+    setCompareMuted(next);
+    if (srcVideoRef.current) srcVideoRef.current.muted = next;
+    if (resultVideoRef.current) resultVideoRef.current.muted = next;
+  }
+
   /** Ambil frame video hasil saat ini (posisi pemutaran pengguna) → data URL. */
   const captureResultFrame = (): Promise<string> => {
     const v = resultVideoRef.current;
@@ -1048,8 +1131,10 @@ export default function VideoFaceEnhancePage() {
                 <figure>
                   <figcaption>Sebelum (video asli)</figcaption>
                   <video
+                    ref={srcVideoRef}
                     src={videoUrl}
                     controls
+                    muted={compareMuted}
                     className="bg-preview-img"
                   />
                 </figure>
@@ -1059,10 +1144,33 @@ export default function VideoFaceEnhancePage() {
                     ref={resultVideoRef}
                     src={resultUrl}
                     controls
+                    muted={compareMuted}
                     className="bg-preview-img"
                   />
                 </figure>
               </div>
+              <div className="compare-controls">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={playBothSync}
+                  title="Putar video asli & hasil bersamaan dari awal, disinkronkan (perbandingan audio/video A/B)"
+                >
+                  ▶️ Putar Keduanya (Sinkron)
+                </button>
+                <button type="button" className="btn" onClick={toggleMute}>
+                  {compareMuted ? "🔇 Suarakan" : "🔊 Bisukan"}
+                </button>
+                <button type="button" className="btn" onClick={stopBoth}>
+                  ⏹ Berhenti
+                </button>
+              </div>
+              <p className="hint compare-hint">
+                💡 Putar Keduanya menjalankan video asli & hasil dari detik 0
+                secara sinkron — cocok untuk membandingkan audio sebelum/sesudah
+                (hasil mempertahankan track audio sumber bila ada). Tombol
+                Bisukan/Suarakan mengendalikan suara kedua pemutar sekaligus.
+              </p>
               <p
                 className={
                   faceFrames > 0 ? "face-note face-found" : "face-note face-miss"

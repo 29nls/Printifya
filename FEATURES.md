@@ -184,7 +184,7 @@ dan restorasi wajah video gaya PGTFormer.
 | **Restorasi wajah video** (per frame, durasi hasil ≈ sumber, ekspor WebM/MP4, **track audio sumber dipertahankan** via WebAudio + **indikator mini waveform** audio terbaca) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
 | **Koherensi temporal** (PGTFormer: blend hasil dengan frame sebelumnya, tanpa pre-alignment) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
 | FPS output & resolusi kerja (512 PGTFormer / 720 / asli) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| Slider manual + perbandingan sebelum/sesudah | ❌ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ (video asli vs hasil) |
+| Slider manual + perbandingan sebelum/sesudah | ❌ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ (video asli vs hasil, **Putar Keduanya sinkron** + **tombol mute eksplisit**) |
 | **Perbesaran resolusi** (2×/4×/8×/kustom) | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ (2×/4× setelah pemulihan — urutan CodeFormer → Real-ESRGAN) | ❌ |
 | Denoise level 0–3 (median filter) | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | TTA (rata-rata 4 orientasi) | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
@@ -322,9 +322,15 @@ dan restorasi wajah video gaya PGTFormer.
   oleh `run()`) lalu `computePeaks` (puncak gabungan kanal per bucket) digambar sebagai SVG
   kecil di samping badge, memberikan bukti visual audio benar-benar terbaca; decode gagal
   menampilkan peringatan "audio tak terbaca". Cache audio di-reset saat video berganti
-  (buffer video lama tidak pernah diputar untuk video baru). Bagian murni
-  (`pickWorkingSize`/`countFrames`/`temporalBlend`/`computePeaks`) terpisah dari orkestrasi
-  agar bisa diuji tanpa DOM/video.
+  (buffer video lama tidak pernah diputar untuk video baru). **Pemutaran banding A/B**: tombol
+  "Putar Keduanya (Sinkron)" menjalankan video asli & hasil dari detik 0 bersamaan (gestur
+  klik → autoplay dengan suara diizinkan) dengan loop rAF yang menjaga keduanya sejajar
+  (drift > 0,12 dtk di-seek ulang, master = sumber; bila salah satu jeda/berakhir, keduanya
+  berhenti) — cocok untuk membandingkan audio sebelum/sesudah; tombol mute eksplisit
+  (Bisukan/Suarakan) mengendalikan suara kedua pemutar sekaligus. Elemen video panel banding
+  terpisah dari video pemrosesan tersembunyi (yang tidak pernah diputar agar drawImage tidak
+  men-taint canvas). Bagian murni (`pickWorkingSize`/`countFrames`/`temporalBlend`/
+  `computePeaks`) terpisah dari orkestrasi agar bisa diuji tanpa DOM/video.
 - **Edit Auto Layout**: foto bisa di-drag untuk mengatur ulang urutan — antar sel di lembar
   maupun thumbnail di strip (keduanya memakai array foto yang sama, jadi pratinjau, label,
   PDF, dan cetak ikut urutan baru). Bingkai photobox berasal dari
