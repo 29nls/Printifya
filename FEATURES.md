@@ -329,8 +329,14 @@ dan restorasi wajah video gaya PGTFormer.
   berhenti) — cocok untuk membandingkan audio sebelum/sesudah; tombol mute eksplisit
   (Bisukan/Suarakan) mengendalikan suara kedua pemutar sekaligus. Elemen video panel banding
   terpisah dari video pemrosesan tersembunyi (yang tidak pernah diputar agar drawImage tidak
-  men-taint canvas). Bagian murni (`pickWorkingSize`/`countFrames`/`temporalBlend`/
-  `computePeaks`) terpisah dari orkestrasi agar bisa diuji tanpa DOM/video.
+  men-taint canvas). **Perekaman memakai helper bersama `recordWithAudio`**
+  (`src/modules/shared/recordWithAudio.ts`): pola BufferSource → MediaStreamAudioDestinationNode
+  (audio `AudioBuffer` diputar ulang saat rekam, track digabung, fallback video saja bila
+  muxing audio+video tak didukung, `stop()` membungkus chunk jadi Blob) — diekstrak agar
+  modul lain yang merekam canvas (animasi/slideshow) bisa memakainya tanpa menyalin logika.
+  Bagian murni (`pickWorkingSize`/`countFrames`/`temporalBlend`/`computePeaks`) terpisah
+  dari orkestrasi agar bisa diuji tanpa DOM/video; `recordWithAudio` diuji dengan mock
+  MediaRecorder/MediaStream (dengan/tanpa audio, fallback muxing, stop + Blob).
 - **Edit Auto Layout**: foto bisa di-drag untuk mengatur ulang urutan — antar sel di lembar
   maupun thumbnail di strip (keduanya memakai array foto yang sama, jadi pratinjau, label,
   PDF, dan cetak ikut urutan baru). Bingkai photobox berasal dari

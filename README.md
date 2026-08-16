@@ -79,6 +79,11 @@ lintas modul tanpa salin-tempel. Peta singkat untuk pendatang baru:
 - **`src/modules/shared/pasFotoBridge.ts` & `autoLayoutBridge.ts`** — meneruskan
   hasil antar modul: ke alur crop Pas Foto 3×4 ("Jadikan Pas Foto 3x4") atau ke
   Auto Layout ("Susun ke A4") dengan awalan label per modul.
+- **`src/modules/shared/recordWithAudio.ts`** — rekam stream canvas ke
+  WebM/MP4 via MediaRecorder dengan track audio opsional (pola BufferSource →
+  MediaStreamAudioDestinationNode, fallback video saja bila muxing tak
+  didukung); dipakai Video Face Enhance, siap dipakai modul lain yang merekam
+  animasi/slideshow.
 
 Alur data pratinjau → PDF/cetak (diagram Mermaid):
 

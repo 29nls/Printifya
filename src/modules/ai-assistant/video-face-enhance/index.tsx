@@ -26,6 +26,10 @@ import {
   saveVideoPrefs,
 } from "./optionsStorage";
 import ResetPreferencesButton from "../../shared/ResetPreferencesButton";
+import {
+  recordWithAudio,
+  type AudioRecorder,
+} from "../../shared/recordWithAudio";
 import "../../photo-studio/shared/style.css";
 import "./style.css";
 
@@ -425,45 +429,19 @@ export default function VideoFaceEnhancePage() {
     if (hasAudio && !audioBuffer) {
       audioBuffer = await ensureAudioBuffer();
     }
-    const makeRecorder = (audioTracks: MediaStreamTrack[]) => {
-      const canvasStream = (canvas as HTMLCanvasElement & {
-        captureStream: (fps?: number) => MediaStream;
-      }).captureStream(params.fps);
-      const withAudio =
-        audioTracks.length > 0
-          ? new MediaStream([
-              ...canvasStream.getVideoTracks(),
-              ...audioTracks,
-            ])
-          : null;
-      let rec: MediaRecorder;
-      let stream: MediaStream;
-      try {
-        // Coba dengan audio; bila muxing audio+video tak didukung untuk mime
-        // ini (mis. mp4 di browser tertentu), MediaRecorder melempar — ulangi
-        // dengan video saja agar perekaman tetap berjalan.
-        stream = withAudio ?? canvasStream;
-        rec = new MediaRecorder(stream, {
-          mimeType: mime,
-          videoBitsPerSecond: 8_000_000,
-        });
-      } catch {
-        stream = canvasStream;
-        rec = new MediaRecorder(stream, {
-          mimeType: mime,
-          videoBitsPerSecond: 8_000_000,
-        });
-      }
-      recorderRef.current = rec;
-      const chunks: BlobPart[] = [];
-      rec.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) chunks.push(e.data);
-      };
-      const stopped = new Promise<void>((resolve) => {
-        rec.onstop = () => resolve();
+    /** Buat perekam canvas + audio (helper bersama recordWithAudio). */
+    const startRecorder = (): AudioRecorder => {
+      const rec = recordWithAudio({
+        canvas,
+        fps: params.fps,
+        mimeType: mime,
+        audio:
+          audioCtxRef.current && audioBuffer
+            ? { context: audioCtxRef.current, buffer: audioBuffer }
+            : null,
       });
-      rec.start();
-      return { stream, rec, chunks, stopped };
+      recorderRef.current = rec.recorder;
+      return rec;
     };
 
     const frameBytes = w * h * 4;
@@ -498,7 +476,7 @@ export default function VideoFaceEnhancePage() {
       return out;
     };
 
-    let recorder: ReturnType<typeof makeRecorder> | null = null;
+    let recorder: AudioRecorder | null = null;
     try {
       if (canPrerender) {
         // Fase 1: proses semua frame ke buffer (recorder BELUM mulai — tidak
@@ -514,24 +492,8 @@ export default function VideoFaceEnhancePage() {
         // Fase 2: mulai rekam, lalu putImageData buffer pada jadwal fps yang
         // tepat (putImageData jauh lebih cepat daripada drawImage+enhance,
         // jadi fase ini selalu mengikuti waktu nyata → durasi ≈ sumber).
-        // Audio diputar ulang dari buffer via BufferSource → destination agar
-        // track audio asli mengalir ke recorder (video sumber tetap pause).
         if (!cancelledRef.current && buffers.length === total) {
-          let audioTracks: MediaStreamTrack[] = [];
-          let srcNode: AudioBufferSourceNode | null = null;
-          if (audioCtxRef.current && audioBuffer) {
-            try {
-              const dest = new MediaStreamAudioDestinationNode(audioCtxRef.current);
-              srcNode = audioCtxRef.current.createBufferSource();
-              srcNode.buffer = audioBuffer;
-              srcNode.connect(dest);
-              srcNode.start();
-              audioTracks = dest.stream.getAudioTracks();
-            } catch {
-              // gagal — rekam tanpa audio
-            }
-          }
-          recorder = makeRecorder(audioTracks);
+          recorder = startRecorder();
           const t0 = performance.now();
           const interval = 1000 / params.fps;
           for (let i = 0; i < total; i++) {
@@ -547,30 +509,11 @@ export default function VideoFaceEnhancePage() {
               setProgress({ done: i + 1, total });
             }
           }
-          try {
-            srcNode?.stop();
-          } catch {
-            // abaikan
-          }
         }
       } else {
         // Video panjang: rekam live sambil proses (bila pemrosesan lebih
         // lambat dari fps, durasi output bisa lebih panjang — dijelaskan di UI).
-        let audioTracks: MediaStreamTrack[] = [];
-        let srcNode: AudioBufferSourceNode | null = null;
-        if (audioCtxRef.current && audioBuffer) {
-          try {
-            const dest = new MediaStreamAudioDestinationNode(audioCtxRef.current);
-            srcNode = audioCtxRef.current.createBufferSource();
-            srcNode.buffer = audioBuffer;
-            srcNode.connect(dest);
-            srcNode.start();
-            audioTracks = dest.stream.getAudioTracks();
-          } catch {
-            // gagal — rekam tanpa audio
-          }
-        }
-        recorder = makeRecorder(audioTracks);
+        recorder = startRecorder();
         const t0 = performance.now();
         const interval = 1000 / params.fps;
         for (let i = 0; i < total; i++) {
@@ -585,11 +528,6 @@ export default function VideoFaceEnhancePage() {
             0
           );
           setProgress({ done: i + 1, total });
-        }
-        try {
-          srcNode?.stop();
-        } catch {
-          // abaikan
         }
       }
     } catch (e) {
@@ -611,12 +549,11 @@ export default function VideoFaceEnhancePage() {
       }
       if (recorder) {
         try {
-          recorder.rec.stop();
+          // Hentikan audio + perekaman, kumpulkan chunk, hentikan track.
+          await recorder.stop();
         } catch {
-          // recorder sudah berhenti
+          // recorder sudah berhenti / gagal — buang hasil parsial
         }
-        await recorder.stopped;
-        recorder.stream.getTracks().forEach((tr) => tr.stop());
         recorderRef.current = null;
       }
     }
