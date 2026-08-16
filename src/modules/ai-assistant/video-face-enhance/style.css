@@ -58,6 +58,36 @@
   margin-left: 4px;
 }
 
+/* Tooltip angka detail waveform (durasi, puncak dB, jumlah kanal) saat hover. */
+.wave-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.wave-wrap::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 7px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1f2937;
+  color: #f9fafb;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  padding: 4px 9px;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+  z-index: 10;
+}
+
+.wave-wrap:hover::after {
+  opacity: 1;
+}
+
 .waveform {
   display: block;
   background: var(--bg);
@@ -125,3 +155,4 @@
   color: var(--text-muted);
   white-space: nowrap;
 }
+

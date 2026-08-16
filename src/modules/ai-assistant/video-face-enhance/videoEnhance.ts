@@ -166,6 +166,22 @@ export function computePeaks(buffer: AudioBuffer, buckets = 160): Float32Array {
   return peaks;
 }
 
+/** Statistik ringkas audio sumber untuk tooltip waveform: puncak (dB) dari
+ *  bucket peak (0..1) + durasi + jumlah kanal. Murni — bisa diuji tanpa DOM.
+ *  `peakDb` ≤ 0 dB (full-scale = 0), `-Infinity` untuk senyap penuh. */
+export function computeWaveStats(
+  peaks: Float32Array,
+  duration: number,
+  channels: number
+): { duration: number; peakDb: number; channels: number } {
+  let peak = 0;
+  for (let i = 0; i < peaks.length; i++) {
+    if (peaks[i] > peak) peak = peaks[i];
+  }
+  const peakDb = peak > 0 ? 20 * Math.log10(peak) : -Infinity;
+  return { duration, peakDb, channels };
+}
+
 const clamp255 = (v: number) => Math.min(255, Math.max(0, v));
 
 /**

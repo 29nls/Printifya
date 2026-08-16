@@ -5,6 +5,7 @@ import { setPendingPasFoto } from "../../shared/pasFotoBridge";
 import { setPendingLayoutPhoto } from "../../shared/autoLayoutBridge";
 import {
   computePeaks,
+  computeWaveStats,
   countFrames,
   DEFAULT_VIDEO_PARAMS,
   FPS_OPTIONS,
@@ -48,6 +49,20 @@ const SLIDERS: {
   { key: "sharpen", label: "Ketajaman", min: 0, max: 100 },
   { key: "color", label: "Koreksi Warna", min: 0, max: 100 },
 ];
+
+/** Teks tooltip waveform: durasi, puncak dB, jumlah kanal (untuk data-tip). */
+function formatWaveTip(s: {
+  duration: number;
+  peakDb: number;
+  channels: number;
+} | null): string {
+  if (!s) return "";
+  const db =
+    s.peakDb === -Infinity
+      ? "−∞ dB"
+      : `${Math.min(0, s.peakDb).toFixed(1)} dB`;
+  return `Durasi ${s.duration.toFixed(1)} dtk · Puncak ${db} · ${s.channels} kanal`;
+}
 
 interface VideoMeta {
   w: number;
@@ -152,6 +167,12 @@ export default function VideoFaceEnhancePage() {
   >("idle");
   // Puncak waveform audio sumber (0..1 per bucket) — SVG mini di samping badge.
   const [waveform, setWaveform] = useState<Float32Array | null>(null);
+  // Statistik ringkas untuk tooltip waveform (durasi, puncak dB, jumlah kanal).
+  const [waveStats, setWaveStats] = useState<{
+    duration: number;
+    peakDb: number;
+    channels: number;
+  } | null>(null);
   // Pemutaran audio sumber untuk cek cepat (klik waveform): diputar via
   // BufferSource → context.destination — elemen video TIDAK pernah diputar
   // (menjaga drawImage agar tidak men-taint canvas).
@@ -326,6 +347,7 @@ export default function VideoFaceEnhancePage() {
     if (!videoUrl || hasAudio !== true) {
       setAudioStatus("idle");
       setWaveform(null);
+      setWaveStats(null);
       return;
     }
     let cancelled = false;
@@ -335,9 +357,13 @@ export default function VideoFaceEnhancePage() {
       if (buf) {
         const peaks = computePeaks(buf);
         setWaveform(peaks);
+        setWaveStats(
+          computeWaveStats(peaks, buf.duration, buf.numberOfChannels)
+        );
         setAudioStatus("ready");
       } else {
         setWaveform(null);
+        setWaveStats(null);
         setAudioStatus("failed");
       }
     });
@@ -433,6 +459,7 @@ export default function VideoFaceEnhancePage() {
       audioBufferRef.current = null;
       audioPromiseRef.current = null;
       setWaveform(null);
+      setWaveStats(null);
       setAudioStatus("idle");
       setVideoUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev);
@@ -938,6 +965,10 @@ export default function VideoFaceEnhancePage() {
                         ⚠️ audio tak terbaca
                       </span>
                     ) : waveform ? (
+                      <span
+                        className="wave-wrap"
+                        data-tip={formatWaveTip(waveStats)}
+                      >
                       <svg
                         className={wavePlaying ? "waveform playing" : "waveform"}
                         width={160}
@@ -963,6 +994,7 @@ export default function VideoFaceEnhancePage() {
                           {wavePlaying
                             ? "Memutar audio sumber — klik untuk menghentikan"
                             : "Klik untuk memutar audio sumber (cek cepat)"}
+                          {waveStats ? ` — ${formatWaveTip(waveStats)}` : ""}
                         </title>
                         {Array.from(waveform, (p, i) => {
                           const h = Math.max(1, Math.round(p * 20));
@@ -979,6 +1011,7 @@ export default function VideoFaceEnhancePage() {
                           );
                         })}
                       </svg>
+                      </span>
                     ) : null}
                   </span>
                 )}
@@ -1003,6 +1036,7 @@ export default function VideoFaceEnhancePage() {
                   audioBufferRef.current = null;
                   audioPromiseRef.current = null;
                   setWaveform(null);
+                  setWaveStats(null);
                   setAudioStatus("idle");
                 }}
               >

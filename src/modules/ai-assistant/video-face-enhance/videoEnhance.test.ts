@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   computePeaks,
+  computeWaveStats,
   countFrames,
   DEFAULT_VIDEO_PARAMS,
   pickWorkingSize,
@@ -337,4 +338,30 @@ describe("computePeaks — data mini waveform dari AudioBuffer", () => {
   });
 });
 
+describe("computeWaveStats — statistik tooltip waveform", () => {
+  it("puncak full-scale → 0 dB; durasi & kanal diteruskan", () => {
+    const s = computeWaveStats(new Float32Array([0.5, 1.0, 0.7]), 2.04, 2);
+    expect(s.peakDb).toBe(0);
+    expect(s.duration).toBe(2.04);
+    expect(s.channels).toBe(2);
+  });
+
+  it("puncak 0,5 → −6,02 dB (20·log10)", () => {
+    const s = computeWaveStats(new Float32Array([0.5, 0.1]), 1, 1);
+    expect(s.peakDb).toBeCloseTo(20 * Math.log10(0.5), 5);
+  });
+
+  it("senyap penuh → −Infinity", () => {
+    expect(computeWaveStats(new Float32Array([0, 0, 0]), 1, 1).peakDb).toBe(
+      -Infinity
+    );
+  });
+
+  it("array kosong → −Infinity (tanpa NaN)", () => {
+    expect(
+      Number.isNaN(computeWaveStats(new Float32Array(0), 1, 1).peakDb)
+    ).toBe(false);
+    expect(computeWaveStats(new Float32Array(0), 1, 1).peakDb).toBe(-Infinity);
+  });
+});
 
