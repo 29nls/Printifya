@@ -36,6 +36,7 @@ const AutoLayoutPage = lazy(() => import("./ai-assistant/auto-layout"));
 const UpscaleDenoisePage = lazy(() => import("./ai-assistant/upscale-denoise"));
 const FaceEnhancePage = lazy(() => import("./ai-assistant/face-enhance"));
 const VideoFaceEnhancePage = lazy(() => import("./ai-assistant/video-face-enhance"));
+const SlideshowToVideoPage = lazy(() => import("./ai-assistant/slideshow-to-video"));
 
 export interface Module {
   id: string;
@@ -262,6 +263,15 @@ export const MODULES: Module[] = [
         description:
           "Pulihkan kualitas wajah pada video (gaya PGTFormer, IJCAI'24): pemulihan wajah per frame (parsing-guided) dengan koherensi temporal tanpa pre-alignment, pipeline per-frame berjalan di Web Worker (UI tetap responsif untuk video panjang; fallback thread utama), sampling frame (semua/setengah/sepertiga — 2×/3× lebih cepat, durasi tetap), ekspor WebM/MP4 dengan track audio sumber dipertahankan (WebAudio → MediaStreamDestination) + indikator mini waveform audio terbaca, bandingkan audio sebelum/sesudah via dua pemutar yang sinkron (Putar Keduanya) dengan tombol mute eksplisit, terusan frame ke pas foto & Auto Layout — preferensi tersimpan dengan tombol reset.",
         Component: VideoFaceEnhancePage,
+      },
+      {
+        id: "slideshow-to-video",
+        title: "Slideshow to Video",
+        path: "/ai-assistant/slideshow-to-video",
+        icon: "🎞️",
+        description:
+          "Susun beberapa foto menjadi video WebM dengan transisi fade — musik latar opsional (loop) via recordWithAudio, pratinjau real-time, pengaturan tersimpan dengan tombol reset.",
+        Component: SlideshowToVideoPage,
       },
     ],
   },

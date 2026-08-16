@@ -3,7 +3,7 @@
 Dokumen ini merangkum kemampuan modul-modul Printifya. Bagian pertama memuat semua modul foto
 (pas foto, visa, custom size, auto layout); bagian kedua memuat modul Document Studio & Print
 Center (PDF Editor, QZ Tray, Network Printer, PDF Export); bagian ketiga memuat semua modul AI
-Assistant (Auto Crop Face, Background Removal, Enhance Photo, Auto Layout, Upscale & Denoise).
+Assistant (Auto Crop Face, Background Removal, Enhance Photo, Auto Layout, Upscale & Denoise, Face Enhance, Video Face Enhance, Slideshow to Video).
 
 # Matriks Fitur Modul Foto
 
@@ -165,48 +165,49 @@ dan restorasi wajah video gaya PGTFormer.
 
 ## Matriks
 
-| Fitur | Auto Crop Face | Background Removal | Enhance Photo | Auto Layout | Upscale & Denoise | Face Enhance | Video Face Enhance |
-|---|---|---|---|---|---|---|---|
-| **Mesin** | `autocrop.ts` + `detectFace` | `bgRemove.ts` (skin-tone + flood fill) | histogram + slider | modul sendiri (grid A4) | `waifu2x.ts` (heuristik) | `faceEnhance.ts` (pemulihan wajah heuristik) | `videoEnhance.ts` (per-frame `faceEnhance` + koherensi temporal + MediaRecorder) |
-| **Pipeline Web Worker** (fallback thread utama bila tidak didukung) | ❌ | ❌ | ❌ | ❌ | ✅ (OffscreenCanvas) | ✅ (full-res, OffscreenCanvas) | ✅ (per-frame, tanpa OffscreenCanvas) |
-| Upload | ✅ | ✅ | ✅ | ✅ (banyak foto) | ✅ (batch) | ✅ | ✅ (video) |
-| **Deteksi wajah otomatis** | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ (per frame) |
-| **Crop rasio pas foto** | ✅ (otomatis + edit manual fallback) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Slider proporsi wajah (zoom, `--facePercent`) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Kasus tanpa wajah → pesan + fallback lembut | ✅ (edit manual) | ❌ | ❌ | ❌ | ❌ | ✅ (koreksi global) | ✅ (koreksi global per frame) |
-| **Hapus latar** (transparan/putih/biru/merah) | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Post-proses mask (opening morfologi) | ❌ | ✅ (`--post-process-mask`) | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Alpha matting (erode size) | ❌ | ✅ (`-a`) | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Unduh mask grayscale | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Pemulihan wajah** (pemulusan kulit + koreksi warna + ketajaman di kotak wajah) | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ (tiap frame) |
-| **Slider fidelitas `w`** (kekuatan pemulihan vs identitas — CodeFormer) | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
-| **Pemulihan warna** foto pudar/hitam-putih + perbaikan latar (background enhancement) | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
-| **Restorasi wajah video** (per frame, durasi hasil ≈ sumber, ekspor WebM/MP4, **track audio sumber dipertahankan** via WebAudio + **indikator mini waveform** audio terbaca) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| **Koherensi temporal** (PGTFormer: blend hasil dengan frame sebelumnya, tanpa pre-alignment) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| FPS output, resolusi kerja (512 PGTFormer / 720 / asli), **sampling frame** (semua/setengah/sepertiga) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| Slider manual + perbandingan sebelum/sesudah | ❌ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ (video asli vs hasil, **Putar Keduanya sinkron** + **tombol mute eksplisit**) |
-| **Perbesaran resolusi** (2×/4×/8×/kustom) | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ (2×/4× setelah pemulihan — urutan CodeFormer → Real-ESRGAN) | ❌ |
-| Denoise level 0–3 (median filter) | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
-| TTA (rata-rata 4 orientasi) | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
-| **Model preset Waifu2x** (Photo-HQ-W4xEX · Photo-Conservative-x4 · Photo-Small-W2xEX · Universal-Fast-W2xEX — profil heuristik skala/denoise/TTA) | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
-| Format output PNG/WebP/JPG + kualitas | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ (PNG) | ❌ (video) |
-| Perbandingan format PNG/WebP/JPG (ukuran file + PSNR) | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
-| **Perbandingan kualitas Face vs Video Face Enhance** pada frame yang sama (PSNR ∞-safe + Δ rata-rata/maks + % piksel berubah) | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ (perbandingan tersedia di Face Enhance) |
-| **Unduh Semua** (batch berurutan, aman browser) | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
-| **Susun lembar cetak** (grid kolom/baris) | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| Kertas A3/A4/A5/R2–R30 | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| Orientasi otomatis potret/lanskap | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| Label nama per foto di lembar | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| Pratinjau ukuran penuh 1:1 (scroll) | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| **Drag urut ulang foto** (lembar antar sel + strip thumbnail) | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| **Bingkai photobox** (60 bingkai, 6 kategori, pratinjau live) | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| **Garis potong (sekat)** antar foto — default aktif (pratinjau/PDF/cetak) | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| **Ekspor PDF** (.pdf) | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| **Cetak** (dialog browser, iframe HTML) | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| Unduh hasil | ✅ PNG | ✅ PNG + mask | ✅ PNG | — (PDF/cetak) | ✅ PNG/WebP/JPG per foto | ✅ PNG | ✅ WebM/MP4 |
-| Terusan **Jadikan Pas Foto** (`pasFotoBridge`) | ✅ 3×4 | ✅ 3×4 | ✅ 3×4 | ✅ 3×4 (per foto) | ✅ 3×4 (per hasil) | ✅ **2×3/3×4/4×6** (pilihan ukuran) | ✅ 3×4 (frame terpilih) |
-| Terusan **Susun ke Auto Layout** (`autoLayoutBridge`) | ✅ (prefix `auto-`) | ✅ (`bg-`) | ✅ (`enhanced-`) | — (modul itu sendiri) | ✅ (`waifu2x-`, satu atau batch) | ✅ (`face-`) | ✅ (`video-`, frame terpilih) |
-| Persist localStorage + tombol reset preferensi | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Fitur | Auto Crop Face | Background Removal | Enhance Photo | Auto Layout | Upscale & Denoise | Face Enhance | Video Face Enhance | Slideshow to Video |
+|---|---|---|---|---|---|---|---|---|
+| **Mesin** | `autocrop.ts` + `detectFace` | `bgRemove.ts` (skin-tone + flood fill) | histogram + slider | modul sendiri (grid A4) | `waifu2x.ts` (heuristik) | `faceEnhance.ts` (pemulihan wajah heuristik) | `videoEnhance.ts` (per-frame `faceEnhance` + koherensi temporal + MediaRecorder) | `slideshow.ts` (coverFit/frameAt) + `recordWithAudio` |
+| **Pipeline Web Worker** (fallback thread utama bila tidak didukung) | ❌ | ❌ | ❌ | ❌ | ✅ (OffscreenCanvas) | ✅ (full-res, OffscreenCanvas) | ✅ (per-frame, tanpa OffscreenCanvas) | ❌ |
+| Upload | ✅ | ✅ | ✅ | ✅ (banyak foto) | ✅ (batch) | ✅ | ✅ (video) | ✅ (banyak foto) |
+| **Deteksi wajah otomatis** | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ (per frame) | ❌ |
+| **Crop rasio pas foto** | ✅ (otomatis + edit manual fallback) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Slider proporsi wajah (zoom, `--facePercent`) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Kasus tanpa wajah → pesan + fallback lembut | ✅ (edit manual) | ❌ | ❌ | ❌ | ❌ | ✅ (koreksi global) | ✅ (koreksi global per frame) | ❌ |
+| **Hapus latar** (transparan/putih/biru/merah) | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Post-proses mask (opening morfologi) | ❌ | ✅ (`--post-process-mask`) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Alpha matting (erode size) | ❌ | ✅ (`-a`) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Unduh mask grayscale | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Pemulihan wajah** (pemulusan kulit + koreksi warna + ketajaman di kotak wajah) | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ (tiap frame) | ❌ |
+| **Slider fidelitas `w`** (kekuatan pemulihan vs identitas — CodeFormer) | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ❌ |
+| **Pemulihan warna** foto pudar/hitam-putih + perbaikan latar (background enhancement) | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ❌ |
+| **Restorasi wajah video** (per frame, durasi hasil ≈ sumber, ekspor WebM/MP4, **track audio sumber dipertahankan** via WebAudio + **indikator mini waveform** audio terbaca) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
+| **Video WebM dari foto** (transisi fade antar slide, musik latar opsional **loop** via `recordWithAudio` — output tidak senyap) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| **Koherensi temporal** (PGTFormer: blend hasil dengan frame sebelumnya, tanpa pre-alignment) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
+| FPS output, resolusi kerja (512 PGTFormer / 720 / asli), **sampling frame** (semua/setengah/sepertiga) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ (FPS 15/24/30 + 720p/1080p) |
+| Slider manual + perbandingan sebelum/sesudah | ❌ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ (video asli vs hasil, **Putar Keduanya sinkron** + **tombol mute eksplisit**) | ❌ (pratinjau play/pause + timecode) |
+| **Perbesaran resolusi** (2×/4×/8×/kustom) | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ (2×/4× setelah pemulihan — urutan CodeFormer → Real-ESRGAN) | ❌ | ❌ |
+| Denoise level 0–3 (median filter) | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| TTA (rata-rata 4 orientasi) | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| **Model preset Waifu2x** (Photo-HQ-W4xEX · Photo-Conservative-x4 · Photo-Small-W2xEX · Universal-Fast-W2xEX — profil heuristik skala/denoise/TTA) | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| Format output PNG/WebP/JPG + kualitas | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ (PNG) | ❌ (video) | ✅ (WebM) |
+| Perbandingan format PNG/WebP/JPG (ukuran file + PSNR) | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| **Perbandingan kualitas Face vs Video Face Enhance** pada frame yang sama (PSNR ∞-safe + Δ rata-rata/maks + % piksel berubah) | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ (perbandingan tersedia di Face Enhance) | ❌ |
+| **Unduh Semua** (batch berurutan, aman browser) | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| **Susun lembar cetak** (grid kolom/baris) | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Kertas A3/A4/A5/R2–R30 | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Orientasi otomatis potret/lanskap | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Label nama per foto di lembar | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Pratinjau ukuran penuh 1:1 (scroll) | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Drag urut ulang foto** (lembar antar sel + strip thumbnail) | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Bingkai photobox** (60 bingkai, 6 kategori, pratinjau live) | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Garis potong (sekat)** antar foto — default aktif (pratinjau/PDF/cetak) | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Ekspor PDF** (.pdf) | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Cetak** (dialog browser, iframe HTML) | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Unduh hasil | ✅ PNG | ✅ PNG + mask | ✅ PNG | — (PDF/cetak) | ✅ PNG/WebP/JPG per foto | ✅ PNG | ✅ WebM/MP4 | ✅ WebM |
+| Terusan **Jadikan Pas Foto** (`pasFotoBridge`) | ✅ 3×4 | ✅ 3×4 | ✅ 3×4 | ✅ 3×4 (per foto) | ✅ 3×4 (per hasil) | ✅ **2×3/3×4/4×6** (pilihan ukuran) | ✅ 3×4 (frame terpilih) | ❌ |
+| Terusan **Susun ke Auto Layout** (`autoLayoutBridge`) | ✅ (prefix `auto-`) | ✅ (`bg-`) | ✅ (`enhanced-`) | — (modul itu sendiri) | ✅ (`waifu2x-`, satu atau batch) | ✅ (`face-`) | ✅ (`video-`, frame terpilih) | ❌ |
+| Persist localStorage + tombol reset preferensi | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ## Contoh Nama File
 
@@ -218,6 +219,7 @@ dan restorasi wajah video gaya PGTFormer.
 | Upscale & Denoise | `<nama>-<skala>x-waifu2x.<fmt>` | `foto-dua-2.5x-waifu2x.jpg` |
 | Face Enhance | `<nama>-face-enhanced.png` | `budi-face-enhanced.png` |
 | Video Face Enhance | `<nama>-face-restored.<fmt>` | `budi-wedding-face-restored.webm` |
+| Slideshow to Video | `slideshow.webm` | `acara-ultah-slideshow.webm` |
 | Auto Layout | `exportLayoutPdf` → `<ukuran>-layout-<kertas>.pdf` | `auto-layout-3x4-layout-a4.pdf` |
 
 ## Catatan Implementasi
@@ -295,13 +297,26 @@ dan restorasi wajah video gaya PGTFormer.
   `waifu2x-`, `face-`, `video-`; Upscale & Denoise bisa mengirim semua hasil batch sekaligus
   via `setPendingLayoutPhotos`; Video Face Enhance mengirim frame video hasil yang sedang
   dipilih pengguna). Auto Layout juga menerima batch multi-orang dari Photo Studio.
-- **Persistensi**: ketujuh modul menyimpan preferensi di localStorage dengan tombol
+- **Slideshow to Video — video WebM dari foto dengan fade**: `slideshow.ts` memuat logika
+  murni (tanpa DOM) yang dipakai pratinjau DAN rekaman agar frame identik: `coverFit`
+  (rect cover-fit terpusat, tidak ada pita kosong), `frameAt` (state slide aktif + proporsi
+  fade; fade dimulai `fadeDur` sebelum peralihan, dibatasi setengah durasi slide, slide
+  terakhir tidak fade keluar), `totalDuration` (slide × durasi per slide). Rekaman berjalan
+  real-time: canvas kerja (720p/1080p sesuai pilihan) digambar tiap rAF sambil di-capture
+  via `canvas.captureStream(fps)` + `MediaRecorder` (WebM) memakai helper bersama
+  `src/modules/shared/recordWithAudio.ts` dengan opsi `loop` untuk musik latar
+  (`AudioBuffer` di-decode dalam gestur klik, diputar berulang via BufferSource →
+  MediaStreamAudioDestinationNode — output tidak senyap; tanpa musik, hasil direkam
+  senyap). Progress rekaman (persen + waktu nyata) tampil dengan tombol Hentikan yang
+  membuang hasil parsial; pratinjau play/pause + timecode memakai logika frame yang sama.
+- **Persistensi**: delapan modul menyimpan preferensi di localStorage dengan tombol
   `ResetPreferencesButton` (konfirmasi dua-klik): Auto Crop Face (zoom `--facePercent`),
   Background Removal (opsi segmen + awalan), Enhance Photo (awalan), Auto Layout
   (grid/kertas/label/bingkai/garis potong), Upscale & Denoise (skala/denoise/TTA/format/
   kualitas + awalan), Face Enhance (awalan), Video Face Enhance (semua opsi pipeline —
   fidelitas, pemulusan, ketajaman, warna, latar, pemulihan warna, koherensi temporal, FPS,
-  resolusi kerja, format — + awalan). Semua akses localStorage lewat helper bersama
+  resolusi kerja, format — + awalan), Slideshow to Video (durasi per slide, fade, FPS,
+  resolusi). Semua akses localStorage lewat helper bersama
   `src/modules/shared/prefsStorage.ts` (`loadJSON` dengan validator per modul, `saveJSON`,
   `loadString`/`saveString`, `removeKeys`) — modul yang memvalidasi field saat muat (Auto
   Layout, Upscale & Denoise, Background Removal, Custom Size, Network Printer) meneruskan

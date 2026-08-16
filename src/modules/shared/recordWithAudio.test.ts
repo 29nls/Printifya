@@ -58,6 +58,7 @@ class FakeMediaStreamAudioDestinationNode {
 function fakeAudioContext() {
   const source = {
     buffer: null as unknown,
+    loop: false,
     connect: vi.fn(),
     start: vi.fn(),
     stop: vi.fn(),
@@ -116,8 +117,21 @@ describe("recordWithAudio — rekam canvas dengan audio opsional", () => {
     });
     expect(source.connect).toHaveBeenCalled();
     expect(source.start).toHaveBeenCalled();
+    // Default loop = false (video: satu putaran audio sumber).
+    expect(source.loop).toBe(false);
     expect(rec.stream.getAudioTracks()).toHaveLength(1);
     expect(rec.stream.getVideoTracks()).toHaveLength(1);
+  });
+
+  it("loop: true → BufferSource diputar berulang (musik latar)", () => {
+    const { context, source } = fakeAudioContext();
+    recordWithAudio({
+      canvas: fakeCanvas(),
+      fps: 15,
+      mimeType: "video/webm",
+      audio: { context, buffer: {} as AudioBuffer, loop: true },
+    });
+    expect(source.loop).toBe(true);
   });
 
   it("muxing audio+video gagal → fallback otomatis ke video saja", () => {

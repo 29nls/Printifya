@@ -21,6 +21,8 @@
 export interface RecordWithAudioAudio {
   context: AudioContext;
   buffer: AudioBuffer;
+  /** Putar berulang (musik latar). Default false — satu putaran (video). */
+  loop?: boolean;
 }
 
 export interface RecordWithAudioOptions {
@@ -64,6 +66,7 @@ export function recordWithAudio(opts: RecordWithAudioOptions): AudioRecorder {
       const dest = new MediaStreamAudioDestinationNode(audio.context);
       srcNode = audio.context.createBufferSource();
       srcNode.buffer = audio.buffer;
+      srcNode.loop = audio.loop ?? false;
       srcNode.connect(dest);
       srcNode.start();
       audioTracks = dest.stream.getAudioTracks();

@@ -1,0 +1,562 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  recordWithAudio,
+  type AudioRecorder,
+  type RecordWithAudioAudio,
+} from "../../shared/recordWithAudio";
+import ResetPreferencesButton from "../../shared/ResetPreferencesButton";
+import {
+  coverFit,
+  frameAt,
+  totalDuration,
+  SLIDESHOW_FPS,
+  SLIDESHOW_RES,
+} from "./slideshow";
+import {
+  clearSlideshowOptions,
+  DEFAULT_SLIDESHOW_PREFS,
+  loadSlideshowPrefs,
+  saveSlideshowPrefs,
+  type SlideshowPrefs,
+} from "./optionsStorage";
+import "./style.css";
+
+/** Muat file gambar (blob URL) menjadi elemen <img> siap digambar. */
+function loadImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("gagal memuat gambar"));
+    img.src = url;
+  });
+}
+
+/** Context audio dibuat dalam gestur klik (autoplay dengan suara diizinkan). */
+function makeAudioContext(): AudioContext | null {
+  try {
+    return new AudioContext();
+  } catch {
+    return null;
+  }
+}
+
+/** Timecode singkat `m:ss.d` untuk pratinjau & progress rekaman. */
+export function fmtTime(t: number): string {
+  if (!Number.isFinite(t) || t < 0) return "0:00.0";
+  const m = Math.floor(t / 60);
+  const s = Math.floor(t % 60);
+  const d = Math.floor((t * 10) % 10);
+  return `${m}:${String(s).padStart(2, "0")}.${d}`;
+}
+
+const PREVIEW_W = 960;
+const PREVIEW_H = 540;
+
+export default function SlideshowToVideoPage() {
+  const [prefs, setPrefs] = useState<SlideshowPrefs>(() => loadSlideshowPrefs());
+  const [photos, setPhotos] = useState<HTMLImageElement[]>([]);
+  const [music, setMusic] = useState<{
+    name: string;
+    buffer: ArrayBuffer | null;
+    decoded: AudioBuffer | null;
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [resultUrl, setResultUrl] = useState<string | null>(null);
+
+  const previewRef = useRef<HTMLCanvasElement>(null);
+  const timeRef = useRef<HTMLSpanElement>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const musicInputRef = useRef<HTMLInputElement>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const rafRef = useRef<number>(0);
+  const cancelledRef = useRef(false);
+  const playStartRef = useRef(0);
+  const resultUrlRef = useRef<string | null>(null);
+
+  const duration = totalDuration(photos.length, prefs.slideDur);
+  const res =
+    SLIDESHOW_RES.find((r) => r.id === prefs.resId) ?? SLIDESHOW_RES[0];
+
+  // --- Gambar satu frame slideshow (cover-fit + fade tumpang-tindih) ---
+  // Satu fungsi untuk pratinjau DAN rekaman → kedua jalur identik.
+  const drawFrame = useCallback(
+    (canvas: HTMLCanvasElement | null, t: number) => {
+      if (!canvas || photos.length === 0) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      const w = canvas.width;
+      const h = canvas.height;
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, w, h);
+      const fr = frameAt(t, photos.length, prefs.slideDur, prefs.fadeDur);
+      const img = photos[fr.index];
+      if (!img || !img.naturalWidth) return;
+      const r = coverFit(img.naturalWidth, img.naturalHeight, w, h);
+      ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);
+      if (fr.next != null && fr.fade > 0 && photos[fr.next]) {
+        const nxt = photos[fr.next];
+        const nr = coverFit(nxt.naturalWidth, nxt.naturalHeight, w, h);
+        ctx.globalAlpha = fr.fade;
+        ctx.drawImage(nxt, nr.dx, nr.dy, nr.dw, nr.dh);
+        ctx.globalAlpha = 1;
+      }
+    },
+    [photos, prefs.slideDur, prefs.fadeDur]
+  );
+
+  const stopPreview = useCallback(() => {
+    cancelAnimationFrame(rafRef.current);
+    rafRef.current = 0;
+    setPlaying(false);
+  }, []);
+
+  const startPreview = useCallback(() => {
+    if (photos.length === 0) return;
+    stopPreview();
+    playStartRef.current = performance.now();
+    setPlaying(true);
+    const loop = () => {
+      const total = totalDuration(photos.length, prefs.slideDur);
+      const t = (performance.now() - playStartRef.current) / 1000;
+      const tt = total > 0 ? t % total : 0;
+      drawFrame(previewRef.current, tt);
+      if (timeRef.current) {
+        timeRef.current.textContent = fmtTime(Math.min(t, total));
+      }
+      rafRef.current = requestAnimationFrame(loop);
+    };
+    rafRef.current = requestAnimationFrame(loop);
+  }, [photos, prefs.slideDur, drawFrame, stopPreview]);
+
+  // Pembersihan saat unmount: hentikan rAF, batal rekaman, revoke URL hasil,
+  // tutup AudioContext (tidak ada pemutaran yang bocor antar halaman).
+  useEffect(() => {
+    resultUrlRef.current = resultUrl;
+  }, [resultUrl]);
+
+  useEffect(() => {
+    return () => {
+      cancelAnimationFrame(rafRef.current);
+      cancelledRef.current = true;
+      if (resultUrlRef.current) URL.revokeObjectURL(resultUrlRef.current);
+      void audioCtxRef.current?.close().catch(() => {});
+      audioCtxRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    saveSlideshowPrefs(prefs);
+  }, [prefs]);
+
+  // --- Upload ---
+  const handlePhotos = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setError(null);
+    setResultUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+    const imgs: HTMLImageElement[] = [];
+    for (const f of Array.from(files)) {
+      if (!f.type.startsWith("image/")) continue;
+      try {
+        const url = URL.createObjectURL(f);
+        const img = await loadImage(url);
+        imgs.push(img);
+      } catch {
+        // file rusak — lewati
+      }
+    }
+    if (imgs.length === 0) {
+      setError("Tidak ada file gambar yang valid (JPG, PNG, atau WebP).");
+      return;
+    }
+    // Revoke URL blob foto lama (sudah tidak dipakai setelah diganti).
+    setPhotos((prev) => {
+      prev.forEach((p) => URL.revokeObjectURL(p.src));
+      return imgs;
+    });
+  };
+
+  const handleMusic = async (f: File | null) => {
+    if (!f) return;
+    const ok =
+      f.type.startsWith("audio/") ||
+      /\.(mp3|wav|ogg|m4a|aac|flac)$/i.test(f.name);
+    if (!ok) {
+      setError("File musik harus berupa audio (MP3, WAV, OGG, M4A, …).");
+      return;
+    }
+    try {
+      const buf = await f.arrayBuffer();
+      setMusic({ name: f.name, buffer: buf, decoded: null });
+      setError(null);
+    } catch {
+      setError("Gagal membaca file musik.");
+    }
+  };
+
+  const clearPhotos = () => {
+    stopPreview();
+    setPhotos((prev) => {
+      prev.forEach((p) => URL.revokeObjectURL(p.src));
+      return [];
+    });
+    setResultUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+  };
+
+  const clearAll = () => {
+    clearPhotos();
+    setMusic(null);
+  };
+
+  // --- Rekaman (real-time, WebM via recordWithAudio + musik latar loop) ---
+  const finishRecord = useCallback(async (rec: AudioRecorder) => {
+    let blob: Blob | null = null;
+    try {
+      blob = await rec.stop();
+    } catch {
+      blob = null;
+    }
+    setRecording(false);
+    setProgress(0);
+    if (cancelledRef.current || !blob || blob.size === 0) {
+      if (!cancelledRef.current) setError("Rekaman gagal — hasil kosong.");
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    setResultUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return url;
+    });
+  }, []);
+
+  const startRecord = async () => {
+    if (photos.length === 0 || recording) return;
+    setError(null);
+    stopPreview();
+    const canvas = document.createElement("canvas");
+    canvas.width = res.width;
+    canvas.height = res.height;
+    if (!("captureStream" in canvas)) {
+      setError("Browser tidak mendukung perekaman canvas (captureStream).");
+      return;
+    }
+    if (!canvas.getContext("2d")) {
+      setError("Canvas 2D tidak tersedia.");
+      return;
+    }
+
+    // Musik latar (opsional): AudioBuffer → loop → MediaStreamDestination.
+    let audio: RecordWithAudioAudio | null = null;
+    if (music) {
+      try {
+        let ctx = audioCtxRef.current;
+        if (!ctx) {
+          ctx = makeAudioContext();
+          audioCtxRef.current = ctx;
+        }
+        if (ctx) {
+          await ctx.resume();
+          let buffer = music.decoded;
+          if (!buffer && music.buffer) {
+            buffer = await ctx.decodeAudioData(music.buffer.slice(0));
+            setMusic((m) => (m ? { ...m, decoded: buffer } : m));
+          }
+          if (buffer) {
+            audio = { context: ctx, buffer, loop: true };
+          }
+        }
+      } catch {
+        // decode gagal — rekam tanpa musik
+      }
+    }
+
+    const rec = recordWithAudio({
+      canvas,
+      fps: prefs.fps,
+      mimeType: "video/webm",
+      audio,
+      videoBitsPerSecond: 12_000_000,
+    });
+
+    cancelledRef.current = false;
+    setRecording(true);
+    setProgress(0);
+    const total = totalDuration(photos.length, prefs.slideDur);
+    const start = performance.now();
+    let lastProgressUpdate = 0;
+    const tick = () => {
+      const t = (performance.now() - start) / 1000;
+      const target = Math.min(total, t);
+      drawFrame(canvas, target);
+      drawFrame(previewRef.current, target); // umpan balik live di pratinjau
+      if (timeRef.current) timeRef.current.textContent = fmtTime(target);
+      const p = total > 0 ? target / total : 1;
+      if (performance.now() - lastProgressUpdate > 120 || p >= 1) {
+        lastProgressUpdate = performance.now();
+        setProgress(p);
+      }
+      if (target < total && !cancelledRef.current) {
+        rafRef.current = requestAnimationFrame(tick);
+      } else {
+        void finishRecord(rec);
+      }
+    };
+    rafRef.current = requestAnimationFrame(tick);
+  };
+
+  const cancelRecord = () => {
+    cancelledRef.current = true;
+  };
+
+  const handleResetPrefs = () => {
+    clearSlideshowOptions();
+    setPrefs({ ...DEFAULT_SLIDESHOW_PREFS });
+  };
+
+  const setNum = (key: "slideDur" | "fadeDur") => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = Number(e.target.value);
+    if (Number.isFinite(v)) setPrefs((p) => ({ ...p, [key]: v }));
+  };
+
+  return (
+    <div className="slideshow-page">
+      <header className="module-header">
+        <span className="module-icon">🎞️</span>
+        <div>
+          <h1>Slideshow to Video</h1>
+          <p>
+            Susun beberapa foto menjadi video <code>WebM</code> dengan transisi
+            fade — musik latar opsional diputar ulang via{" "}
+            <code>recordWithAudio</code> (BufferSource → MediaStreamDestination),
+            semua proses lokal di browser.
+          </p>
+        </div>
+      </header>
+
+      <section className="panel">
+        <div className="upload-row">
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => photoInputRef.current?.click()}
+          >
+            📷 Pilih Foto
+          </button>
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            onChange={(e) => {
+              void handlePhotos(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          {photos.length > 0 && (
+            <button type="button" className="btn" onClick={clearPhotos}>
+              🔄 Foto Lain
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn"
+            onClick={() => musicInputRef.current?.click()}
+          >
+            🎵 Musik Latar
+          </button>
+          <input
+            ref={musicInputRef}
+            type="file"
+            accept="audio/*,.mp3,.wav,.ogg,.m4a,.aac,.flac"
+            hidden
+            onChange={(e) => {
+              void handleMusic(e.target.files?.[0] ?? null);
+              e.target.value = "";
+            }}
+          />
+          {music && (
+            <button type="button" className="btn" onClick={() => setMusic(null)}>
+              Hapus Musik
+            </button>
+          )}
+        </div>
+
+        {photos.length > 0 && (
+          <div className="slideshow-strip">
+            {photos.map((p, i) => (
+              <div className="slideshow-thumb" key={i}>
+                <img src={p.src} alt={`Foto ${i + 1}`} />
+                <span className="idx">{i + 1}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {music && (
+          <div className="slideshow-music">
+            🎵 <strong>{music.name}</strong> — diputar berulang sebagai latar
+            saat rekaman
+          </div>
+        )}
+
+        {error && <p className="error">{error}</p>}
+        {photos.length === 0 && (
+          <p className="hint">
+            💡 Pilih minimal satu foto (urutan strip = urutan slide). Musik
+            latar opsional — tanpa musik, hasil tetap direkam (senyap).
+          </p>
+        )}
+      </section>
+
+      {photos.length > 0 && (
+        <>
+          <section className="panel">
+            <div className="slideshow-options">
+              <label>
+                Durasi per slide (dtk)
+                <input
+                  type="number"
+                  min={1}
+                  max={30}
+                  step={0.5}
+                  value={prefs.slideDur}
+                  onChange={setNum("slideDur")}
+                />
+              </label>
+              <label>
+                Transisi fade (dtk)
+                <input
+                  type="number"
+                  min={0}
+                  max={10}
+                  step={0.25}
+                  value={prefs.fadeDur}
+                  onChange={setNum("fadeDur")}
+                />
+              </label>
+              <label>
+                FPS output
+                <select
+                  value={prefs.fps}
+                  onChange={(e) =>
+                    setPrefs((p) => ({
+                      ...p,
+                      fps: Number(e.target.value) as SlideshowPrefs["fps"],
+                    }))
+                  }
+                >
+                  {SLIDESHOW_FPS.map((f) => (
+                    <option key={f} value={f}>
+                      {f} fps
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Resolusi
+                <select
+                  value={prefs.resId}
+                  onChange={(e) =>
+                    setPrefs((p) => ({ ...p, resId: e.target.value }))
+                  }
+                >
+                  {SLIDESHOW_RES.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="slideshow-preview-wrap">
+              <canvas
+                ref={previewRef}
+                width={PREVIEW_W}
+                height={PREVIEW_H}
+                className="slideshow-preview"
+              />
+              <span className="slideshow-timecode" ref={timeRef}>
+                0:00.0
+              </span>
+            </div>
+
+            <div className="slideshow-controls">
+              <button
+                type="button"
+                className="btn"
+                disabled={recording}
+                onClick={playing ? stopPreview : startPreview}
+              >
+                {playing ? "⏸ Jeda" : "▶️ Putar Pratinjau"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={recording}
+                onClick={() => void startRecord()}
+              >
+                {recording ? "⏳ Merekam…" : "🎬 Rekam Video"}
+              </button>
+              {recording && (
+                <button type="button" className="btn" onClick={cancelRecord}>
+                  ⏹ Hentikan
+                </button>
+              )}
+            </div>
+
+            {recording && (
+              <div className="slideshow-progress">
+                <div className="slideshow-progress-bar">
+                  <div
+                    className="slideshow-progress-fill"
+                    style={{ width: `${progress * 100}%` }}
+                  />
+                </div>
+                <span>
+                  {Math.round(progress * 100)}% ({fmtTime(progress * duration)}{" "}
+                  / {fmtTime(duration)})
+                </span>
+              </div>
+            )}
+
+            {resultUrl && (
+              <div className="slideshow-result">
+                <video src={resultUrl} controls loop />
+                <div className="slideshow-controls">
+                  <a
+                    className="btn btn-primary"
+                    href={resultUrl}
+                    download="slideshow.webm"
+                  >
+                    ⬇️ Unduh WebM
+                  </a>
+                  <button type="button" className="btn" onClick={clearAll}>
+                    🔄 Video Lain
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
+
+          <div className="prefs-row">
+            <ResetPreferencesButton
+              title="Hapus pengaturan tersimpan modul ini (durasi slide, fade, FPS, resolusi)"
+              onReset={handleResetPrefs}
+            />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
