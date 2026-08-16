@@ -388,19 +388,35 @@ export default function SlideshowToVideoPage() {
     const start = performance.now();
     let lastProgressUpdate = 0;
     const tick = () => {
-      const t = (performance.now() - start) / 1000;
-      const target = Math.min(total, t);
-      drawFrame(canvas, target);
-      drawFrame(previewRef.current, target); // umpan balik live di pratinjau
-      if (timeRef.current) timeRef.current.textContent = fmtTime(target);
-      const p = total > 0 ? target / total : 1;
-      if (performance.now() - lastProgressUpdate > 120 || p >= 1) {
-        lastProgressUpdate = performance.now();
-        setProgress(p);
-      }
-      if (target < total && !cancelledRef.current) {
-        rafRef.current = requestAnimationFrame(tick);
-      } else {
+      try {
+        const t = (performance.now() - start) / 1000;
+        const target = Math.min(total, t);
+        drawFrame(canvas, target);
+        drawFrame(previewRef.current, target); // umpan balik live di pratinjau
+        if (timeRef.current) timeRef.current.textContent = fmtTime(target);
+        const p = total > 0 ? target / total : 1;
+        if (performance.now() - lastProgressUpdate > 120 || p >= 1) {
+          lastProgressUpdate = performance.now();
+          setProgress(p);
+        }
+        if (target < total && !cancelledRef.current) {
+          rafRef.current = requestAnimationFrame(tick);
+        } else {
+          void finishRecord(rec);
+        }
+      } catch (e) {
+        // Satu frame gagal (mis. foto korup / drawImage throw) — JANGAN biarkan
+        // loop rAF mati diam-diam: tampilkan error, putus loop, dan jalankan
+        // jalur cleanup yang SAMA dengan selesai/batal (stop recorder, buang
+        // hasil parsial, reset busy/progress/bytes) agar rekaman tidak macet
+        // permanen dan tombol Hentikan/ulang selalu berfungsi.
+        cancelledRef.current = true;
+        setError(
+          e instanceof Error
+            ? `Rekaman gagal: ${e.message}`
+            : "Rekaman gagal — kesalahan saat memproses frame."
+        );
+        stopPreviewMusic();
         void finishRecord(rec);
       }
     };
