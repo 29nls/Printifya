@@ -235,7 +235,7 @@ export const MODULES: Module[] = [
         path: "/ai-assistant/auto-layout",
         icon: "🧩",
         description:
-          "Susun banyak foto otomatis ke template halaman cetak — drag untuk mengatur urutan (lembar & strip), 60 bingkai photobox dengan teks Booth per foto, garis potong, ekspor PDF & cetak HTML.",
+          "Susun banyak foto otomatis ke template halaman cetak — drag untuk mengatur urutan (lembar & strip), 60 bingkai photobox dengan teks Booth per foto, garis potong, ekspor PDF & cetak HTML; framing batch dijalankan di Web Worker (UI tidak membeku; fallback thread utama).",
         Component: AutoLayoutPage,
       },
       {

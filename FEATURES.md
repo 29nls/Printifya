@@ -168,7 +168,7 @@ dan restorasi wajah video gaya PGTFormer.
 | Fitur | Auto Crop Face | Background Removal | Enhance Photo | Auto Layout | Upscale & Denoise | Face Enhance | Video Face Enhance | Slideshow to Video |
 |---|---|---|---|---|---|---|---|---|
 | **Mesin** | `autocrop.ts` + `detectFace` | `bgRemove.ts` (skin-tone + flood fill) | histogram + slider | modul sendiri (grid A4) | `waifu2x.ts` (heuristik) | `faceEnhance.ts` (pemulihan wajah heuristik) | `videoEnhance.ts` (per-frame `faceEnhance` + koherensi temporal + MediaRecorder) | `slideshow.ts` (coverFit/frameAt) + `recordWithAudio` |
-| **Pipeline Web Worker** (fallback thread utama bila tidak didukung) | ❌ | ✅ (encode hasil — segmentasi tetap main-thread) | ✅ (full-res, OffscreenCanvas) | ❌ | ✅ (OffscreenCanvas) | ✅ (full-res, OffscreenCanvas) | ✅ (per-frame, tanpa OffscreenCanvas) | ❌ |
+| **Pipeline Web Worker** (fallback thread utama bila tidak didukung) | ❌ | ✅ (encode hasil — segmentasi tetap main-thread) | ✅ (full-res, OffscreenCanvas) | ✅ (framing batch — pool kecil, OffscreenCanvas) | ✅ (OffscreenCanvas) | ✅ (full-res, OffscreenCanvas) | ✅ (per-frame, tanpa OffscreenCanvas) | ❌ |
 | Upload | ✅ | ✅ | ✅ | ✅ (banyak foto) | ✅ (batch) | ✅ | ✅ (video) | ✅ (banyak foto) |
 | **Deteksi wajah otomatis** | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ (per frame) | ❌ |
 | **Crop rasio pas foto** | ✅ (otomatis + edit manual fallback) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
@@ -310,6 +310,17 @@ dan restorasi wajah video gaya PGTFormer.
   (pola fill O(1)). **Fallback thread utama** bila tanpa Worker/createImageBitmap. Token
   urutan file (`fileSeqRef`) + operasi (`opSeqRef`) membuang hasil basi — ganti file cepat
   atau toggle opsi segmen beruntun tidak menimpa hasil terbaru dan busy state tidak flicker.
+- **Auto Layout — framing batch di Web Worker (pool)**: reframe (pilih bingkai, ganti set
+  foto, ekspor/cetak via `ensureFreshFrames`) berjalan di pool kecil 2–3 worker
+  (`frame.worker.ts` + `frameWorker.ts`/`frameAll`, pola `createWorkerClient`): thread utama
+  hanya `fetch` Blob sumber (blob:/data:), sementara decode `createImageBitmap`, cover-fit
+  `coverFitRect` (sumber tunggal yang sama dengan `applyFrame` thread utama), gambar bingkai
+  photobox, encode PNG `OffscreenCanvas.convertToBlob`, dan base64 FileReader semuanya di
+  worker — batch 30 foto full-res terukur 1031 ms dengan ~96% coverage main-thread (jalur
+  lama 1282 ms, diblokir ~81%), hasil piksel identik (0 px beda). Satu Blob per permintaan
+  diproses berurutan per worker (memori aman), flag `cancelled` dicek per foto, pool
+  di-terminate saat modul dilepas. **Fallback thread utama** (`applyFrame`) bila tanpa
+  Worker/createImageBitmap.
 - **Bridge antar-modul**: `pasFotoBridge` meneruskan hasil ke alur crop pas foto (semua
   modul AI + Auto Layout per foto + Upscale & Denoise per hasil; Face Enhance memilih
   ukuran 2×3/3×4/4×6 lalu modul tujuan — Pas Foto 2×3, 3×4, 4×6 — semuanya mengonsumsi
