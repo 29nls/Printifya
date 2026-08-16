@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { type FaceEnhanceParams } from "../face-enhance/faceEnhance";
 import { setPendingPasFoto } from "../../shared/pasFotoBridge";
@@ -23,6 +23,7 @@ import type {
   FaceWorkerRequestNoId,
   FaceWorkerResponse,
 } from "./faceWorkerApi";
+import { createWorkerClient } from "../../shared/createWorkerClient";
 import {
   clearVideoOptions,
   loadVideoPrefs,
@@ -177,11 +178,17 @@ export default function VideoFaceEnhancePage() {
   // temporalBlend) — UI tetap responsif untuk video panjang; fallback thread
   // utama bila browser tanpa Worker.
   const useWorker = typeof Worker !== "undefined";
-  const faceWorkerRef = useRef<Worker | null>(null);
-  const faceWorkerSeqRef = useRef(0);
-  /** Penolak promise postFaceWorker yang masih menunggu — ditolak saat unmount
-   *  (worker di-terminate) agar antrean tidak menggantung. */
-  const pendingFaceWorkerRef = useRef<Set<(e: Error) => void>>(new Set());
+  const faceWorkerClient = useMemo(
+    () =>
+      createWorkerClient<FaceWorkerRequestNoId, FaceWorkerResponse>({
+        createWorker: () =>
+          new Worker(new URL("./faceWorker.ts", import.meta.url), {
+            type: "module",
+          }),
+        errorMessage: "Worker gagal memproses frame.",
+      }),
+    []
+  );
   const navigate = useNavigate();
 
   // Persist semua opsi + awalan setiap berubah.
@@ -217,12 +224,7 @@ export default function VideoFaceEnhancePage() {
       stopSyncLoop();
       // Hentikan worker per-frame: tolak permintaan yang masih menunggu agar
       // tidak menggantung, lalu terminate.
-      pendingFaceWorkerRef.current.forEach((reject) =>
-        reject(new Error("Worker dihentikan."))
-      );
-      pendingFaceWorkerRef.current.clear();
-      faceWorkerRef.current?.terminate();
-      faceWorkerRef.current = null;
+      faceWorkerClient.terminate();
       const { videoUrl: vUrl, resultUrl: rUrl } = urlsRef.current;
       if (vUrl) URL.revokeObjectURL(vUrl);
       if (rUrl) URL.revokeObjectURL(rUrl);
@@ -230,46 +232,7 @@ export default function VideoFaceEnhancePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const getFaceWorker = (): Worker => {
-    if (!faceWorkerRef.current) {
-      faceWorkerRef.current = new Worker(
-        new URL("./faceWorker.ts", import.meta.url),
-        { type: "module" }
-      );
-    }
-    return faceWorkerRef.current;
-  };
 
-  /** Kirim satu pekerjaan per-frame ke worker; resolve saat balasan dengan id
-   *  cocok tiba. `pixels` (ArrayBuffer) selalu dikirim via transfer (tanpa
-   *  salin). */
-  const postFaceWorker = (
-    msg: FaceWorkerRequestNoId,
-    transfer: Transferable[]
-  ): Promise<FaceWorkerResponse> => {
-    const worker = getFaceWorker();
-    const id = ++faceWorkerSeqRef.current;
-    return new Promise((resolve, reject) => {
-      const cleanup = () => {
-        worker.removeEventListener("message", onMessage);
-        worker.removeEventListener("error", onError);
-        pendingFaceWorkerRef.current.delete(reject);
-      };
-      const onMessage = (e: MessageEvent<FaceWorkerResponse>) => {
-        if (e.data.id !== id) return;
-        cleanup();
-        resolve(e.data);
-      };
-      const onError = () => {
-        cleanup();
-        reject(new Error("Worker gagal memproses frame."));
-      };
-      pendingFaceWorkerRef.current.add(reject);
-      worker.addEventListener("message", onMessage);
-      worker.addEventListener("error", onError);
-      worker.postMessage({ ...msg, id }, transfer);
-    });
-  };
 
   /**
    * Pastikan AudioBuffer sumber ter-decode (sekali per video; hasil di-cache).
@@ -315,7 +278,8 @@ export default function VideoFaceEnhancePage() {
     void ensureAudioBuffer().then((buf) => {
       if (cancelled) return;
       if (buf) {
-        setWaveform(computePeaks(buf));
+        const peaks = computePeaks(buf);
+        setWaveform(peaks);
         setAudioStatus("ready");
       } else {
         setWaveform(null);
@@ -525,7 +489,7 @@ export default function VideoFaceEnhancePage() {
     // dari run/video sebelumnya (worker menyimpan prev secara internal).
     if (useWorker) {
       try {
-        await postFaceWorker({ type: "reset" }, []);
+        await faceWorkerClient.post({ type: "reset" });
       } catch {
         // worker gagal — proses di thread utama sebagai fallback
       }
@@ -543,7 +507,7 @@ export default function VideoFaceEnhancePage() {
       const img = ctx.getImageData(0, 0, w, h);
       if (useWorker) {
         // Piksel dikirim via transfer (tanpa salin); hasil di-transfer balik.
-        const res = await postFaceWorker(
+        const res = await faceWorkerClient.post(
           {
             type: "processFrame",
             pixels: img.data.buffer,
@@ -1181,8 +1145,10 @@ export default function VideoFaceEnhancePage() {
               menjadi AudioBuffer lalu diputar ulang via WebAudio →
               MediaStreamDestination saat rekam — output tidak senyap bila video
               sumber punya suara. Mini waveform di samping badge 🔊 menunjukkan
-              audio benar-benar terbaca (hasil decode); bila muncul "⚠️ audio tak
-              terbaca", hasil direkam tanpa suara.
+              audio benar-benar terbaca (hasil decode); **klik waveform untuk
+              memutar/jeda audio sumber** (cek cepat, tanpa membuka pemutar
+              penuh — diputar via WebAudio, elemen video tidak disentuh); bila
+              muncul "⚠️ audio tak terbaca", hasil direkam tanpa suara.
             </p>
           </section>
 

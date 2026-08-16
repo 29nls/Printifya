@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   canvasLikeToBlob,
@@ -13,6 +13,7 @@ import type {
   Waifu2xWorkerRequestNoId,
   Waifu2xWorkerResponse,
 } from "./waifu2xWorkerApi";
+import { createWorkerClient } from "../../shared/createWorkerClient";
 import { setPendingPasFoto } from "../../shared/pasFotoBridge";
 import {
   setPendingLayoutPhoto,
@@ -211,54 +212,17 @@ export default function UpscaleDenoisePage() {
   // agar batch tidak membekukan UI; fallback thread utama bila tidak didukung.
   const offscreenWorker =
     typeof OffscreenCanvas !== "undefined" && typeof Worker !== "undefined";
-  const workerRef = useRef<Worker | null>(null);
-  const workerSeqRef = useRef(0);
-  /** Penolak promise postWorker yang masih menunggu balasan — saat Batal,
-   *  semua permintaan tertunda ditolak sekaligus agar pool berhenti seketika
-   *  (bukan menunggu worker menyelesaikan antrean). */
-  const pendingWorkerRef = useRef<Set<(e: Error) => void>>(new Set());
-
-  const getWorker = (): Worker => {
-    if (!workerRef.current) {
-      workerRef.current = new Worker(
-        new URL("./waifu2x.worker.ts", import.meta.url),
-        { type: "module" }
-      );
-    }
-    return workerRef.current;
-  };
-
-  /** Kirim satu pekerjaan (process/compare) ke worker; resolve saat balasan
-   *  dengan id cocok tiba. `bitmap` selalu dikirim via transfer (tanpa salin).
-   *  Penolak dicatat di pendingWorkerRef agar Batal bisa menolak permintaan
-   *  yang masih menunggu (setelah worker di-terminate, tidak ada event lagi). */
-  const postWorker = (
-    msg: Waifu2xWorkerRequestNoId,
-    transfer: Transferable[]
-  ): Promise<Waifu2xWorkerResponse> => {
-    const worker = getWorker();
-    const id = ++workerSeqRef.current;
-    return new Promise((resolve, reject) => {
-      const cleanup = () => {
-        worker.removeEventListener("message", onMessage);
-        worker.removeEventListener("error", onError);
-        pendingWorkerRef.current.delete(reject);
-      };
-      const onMessage = (e: MessageEvent<Waifu2xWorkerResponse>) => {
-        if (e.data.id !== id) return;
-        cleanup();
-        resolve(e.data);
-      };
-      const onError = () => {
-        cleanup();
-        reject(new Error("Worker gagal memproses gambar."));
-      };
-      pendingWorkerRef.current.add(reject);
-      worker.addEventListener("message", onMessage);
-      worker.addEventListener("error", onError);
-      worker.postMessage({ ...msg, id }, transfer);
-    });
-  };
+  const workerClient = useMemo(
+    () =>
+      createWorkerClient<Waifu2xWorkerRequestNoId, Waifu2xWorkerResponse>({
+        createWorker: () =>
+          new Worker(new URL("./waifu2x.worker.ts", import.meta.url), {
+            type: "module",
+          }),
+        errorMessage: "Worker gagal memproses gambar.",
+      }),
+    []
+  );
 
   useEffect(
     () => () => {
@@ -266,8 +230,7 @@ export default function UpscaleDenoisePage() {
       urlsRef.current.forEach((u) => URL.revokeObjectURL(u));
       resultBitmapsRef.current.forEach((b) => b.close());
       resultBitmapsRef.current.clear();
-      workerRef.current?.terminate();
-      workerRef.current = null;
+      workerClient.terminate();
     },
     []
   );
@@ -370,7 +333,7 @@ export default function UpscaleDenoisePage() {
           bmp.close();
           return;
         }
-        const res = await postWorker(
+        const res = await workerClient.post(
           { type: "process", bitmap: bmp, options: { scale, denoise, tta }, format: outFormat, quality: quality / 100 },
           [bmp]
         );
@@ -468,7 +431,10 @@ export default function UpscaleDenoisePage() {
           const blob = await fetch(it.resultUrl!).then((r) => r.blob());
           bmp = await createImageBitmap(blob);
         }
-        const res = await postWorker({ type: "compare", bitmap: bmp, quality }, [bmp]);
+        const res = await workerClient.post(
+          { type: "compare", bitmap: bmp, quality },
+          [bmp]
+        );
         if (!res.ok) throw new Error(res.error);
         if (res.type !== "compare") throw new Error("Respons worker tak terduga.");
         formats = res.stats;
@@ -509,12 +475,9 @@ export default function UpscaleDenoisePage() {
   const cancelBatch = () => {
     if (!processing) return;
     cancelledRef.current = true;
-    pendingWorkerRef.current.forEach((reject) =>
-      reject(new Error("Batch dibatalkan."))
-    );
-    pendingWorkerRef.current.clear();
-    workerRef.current?.terminate();
-    workerRef.current = null;
+    // Tolak semua permintaan tertunda & hentikan worker (antrean dibatalkan
+    // seketika — pool berhenti karena postWorker menolak).
+    workerClient.terminate(new Error("Batch dibatalkan."));
     setItems((prev) =>
       prev.map((x) =>
         x.status === "memproses" || x.status === "menunggu"

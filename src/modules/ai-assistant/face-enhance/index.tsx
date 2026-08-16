@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { detectFace, type FaceRegion } from "../../photo-studio/shared/faceDetect";
 import { setPendingPasFoto } from "../../shared/pasFotoBridge";
@@ -13,6 +13,7 @@ import type {
   FaceEnhanceWorkerRequestNoId,
   FaceEnhanceWorkerResponse,
 } from "./faceEnhanceWorkerApi";
+import { createWorkerClient } from "../../shared/createWorkerClient";
 import {
   clearFaceEnhanceOptions,
   loadLayoutPrefix,
@@ -100,64 +101,25 @@ export default function FaceEnhancePage() {
   // Web Worker pipeline full-res (restore wajah + perbesaran 2×/4×) — foto
   // besar tidak membekukan UI; fallback thread utama bila browser tanpa Worker.
   const useWorker = typeof Worker !== "undefined";
-  const faceWorkerRef = useRef<Worker | null>(null);
-  const faceWorkerSeqRef = useRef(0);
-  /** Penolak promise postFaceEnhanceWorker yang masih menunggu — ditolak saat
-   *  unmount (worker di-terminate) agar antrean tidak menggantung. */
-  const pendingFaceWorkerRef = useRef<Set<(e: Error) => void>>(new Set());
+  const faceWorkerClient = useMemo(
+    () =>
+      createWorkerClient<
+        FaceEnhanceWorkerRequestNoId,
+        FaceEnhanceWorkerResponse
+      >({
+        createWorker: () =>
+          new Worker(new URL("./faceEnhance.worker.ts", import.meta.url), {
+            type: "module",
+          }),
+        errorMessage: "Worker gagal memproses foto.",
+      }),
+    []
+  );
 
   // Hentikan worker saat komponen dilepas: tolak permintaan tertunda, terminate.
   useEffect(() => {
-    return () => {
-      pendingFaceWorkerRef.current.forEach((reject) =>
-        reject(new Error("Worker dihentikan."))
-      );
-      pendingFaceWorkerRef.current.clear();
-      faceWorkerRef.current?.terminate();
-      faceWorkerRef.current = null;
-    };
-  }, []);
-
-  const getFaceWorker = (): Worker => {
-    if (!faceWorkerRef.current) {
-      faceWorkerRef.current = new Worker(
-        new URL("./faceEnhance.worker.ts", import.meta.url),
-        { type: "module" }
-      );
-    }
-    return faceWorkerRef.current;
-  };
-
-  /** Kirim satu pekerjaan full-res ke worker; resolve saat balasan dengan id
-   *  cocok tiba. `pixels` (ArrayBuffer) selalu dikirim via transfer (tanpa
-   *  salin). */
-  const postFaceEnhanceWorker = (
-    msg: FaceEnhanceWorkerRequestNoId,
-    transfer: Transferable[]
-  ): Promise<FaceEnhanceWorkerResponse> => {
-    const worker = getFaceWorker();
-    const id = ++faceWorkerSeqRef.current;
-    return new Promise((resolve, reject) => {
-      const cleanup = () => {
-        worker.removeEventListener("message", onMessage);
-        worker.removeEventListener("error", onError);
-        pendingFaceWorkerRef.current.delete(reject);
-      };
-      const onMessage = (e: MessageEvent<FaceEnhanceWorkerResponse>) => {
-        if (e.data.id !== id) return;
-        cleanup();
-        resolve(e.data);
-      };
-      const onError = () => {
-        cleanup();
-        reject(new Error("Worker gagal memproses foto."));
-      };
-      pendingFaceWorkerRef.current.add(reject);
-      worker.addEventListener("message", onMessage);
-      worker.addEventListener("error", onError);
-      worker.postMessage({ ...msg, id }, transfer);
-    });
-  };
+    return () => faceWorkerClient.terminate();
+  }, [faceWorkerClient]);
 
   // Metrik perbandingan (local const agar narrowing TS berlaku di JSX).
   const compareMetrics = compare?.result.metrics ?? null;
@@ -272,7 +234,7 @@ export default function FaceEnhancePage() {
     ctx.drawImage(img, 0, 0);
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const buffer = imageData.data.buffer as ArrayBuffer;
-    const res = await postFaceEnhanceWorker(
+    const res = await faceWorkerClient.post(
       {
         type: "process",
         pixels: buffer,
