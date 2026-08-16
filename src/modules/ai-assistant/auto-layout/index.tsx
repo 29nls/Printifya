@@ -128,34 +128,40 @@ export default function AutoLayoutPage() {
   // preset aktif & kertas aktif (batas maks kolom/baris berbeda per ukuran).
   const [saved] = useState(() => loadLayoutSettings());
   const [paper, setPaper] = useState<PaperSize>(() => getPaper(saved?.paperId));
-  // Batas grid maksimum: potret ATAU lanskap (grid yang hanya muat melintang
-  // tetap bisa dijangkau; orientasi otomatis mengikuti grid).
-  const initMaxC =
-    Math.max(
-      maxCols(PRESETS[1], MIN_MARGIN_CM, paper),
-      maxCols(PRESETS[1], MIN_MARGIN_CM, paper, "landscape")
-    );
-  const initMaxR =
-    Math.max(
-      maxRows(PRESETS[1], MIN_MARGIN_CM, paper),
-      maxRows(PRESETS[1], MIN_MARGIN_CM, paper, "landscape")
-    );
+  // Margin yang DIMUAT (di-clamp ke [0.2, 1.5]). Batas grid saat load dihitung
+  // dari margin INI — bukan MIN_MARGIN_CM — sehingga config valid yang disimpan
+  // pada margin kecil tidak reload sebagai "Grid X×Y tidak muat" pada margin
+  // tersimpan yang lebih besar (ekspor terblokir sampai disesuaikan manual).
+  const initMargin = clampNum(
+    String(saved?.marginCm ?? DEFAULT_MARGIN_CM),
+    0.2,
+    1.5
+  );
+  const [marginCm, setMarginCm] = useState(initMargin);
+  // Grid tersimpan dipertahankan HANYA bila pasangan (cols, rows) benar-benar
+  // muat di SALAH SATU orientasi pada margin tersimpan (potret ATAU lanskap —
+  // orientasi otomatis memilih yang muat). Bila tidak (data versi lama, atau
+  // margin tersimpan mengubah muat), clamp ke batas POTRET — pasangan
+  // (maxCols, maxRows) potret dijamin muat karena cek lebar/tinggi independen,
+  // jadi tidak ada peringatan "tidak muat" palsu saat reload.
+  const roundSavedC = Math.max(
+    1,
+    Math.round(saved?.cols ?? maxCols(PRESETS[1], DEFAULT_MARGIN_CM, paper))
+  );
+  const roundSavedR = Math.max(
+    1,
+    Math.round(saved?.rows ?? maxRows(PRESETS[1], DEFAULT_MARGIN_CM, paper))
+  );
+  const savedGridFits =
+    fitsA4(PRESETS[1], roundSavedC, roundSavedR, initMargin, paper, "portrait") ||
+    fitsA4(PRESETS[1], roundSavedC, roundSavedR, initMargin, paper, "landscape");
+  const portraitMaxC = maxCols(PRESETS[1], initMargin, paper);
+  const portraitMaxR = maxRows(PRESETS[1], initMargin, paper);
   const [cols, setCols] = useState(() =>
-    clampInt(
-      String(saved?.cols ?? maxCols(PRESETS[1], DEFAULT_MARGIN_CM, paper)),
-      1,
-      initMaxC
-    )
+    savedGridFits ? roundSavedC : Math.min(roundSavedC, portraitMaxC)
   );
   const [rows, setRows] = useState(() =>
-    clampInt(
-      String(saved?.rows ?? maxRows(PRESETS[1], DEFAULT_MARGIN_CM, paper)),
-      1,
-      initMaxR
-    )
-  );
-  const [marginCm, setMarginCm] = useState(() =>
-    clampNum(String(saved?.marginCm ?? DEFAULT_MARGIN_CM), 0.2, 1.5)
+    savedGridFits ? roundSavedR : Math.min(roundSavedR, portraitMaxR)
   );
   const [page, setPage] = useState(0);
   const [showLabels, setShowLabels] = useState(saved?.showLabels ?? false);
@@ -411,6 +417,19 @@ export default function AutoLayoutPage() {
     setRows(maxRows(size, DEFAULT_MARGIN_CM, p));
     setPage(0);
     setError("");
+  };
+
+  /** Ganti margin: arah sebaliknya dari clamp-load — margin dinaikkan dan
+   *  grid tidak muat lagi di orientasi pilihan → cols/rows diturunkan otomatis
+   *  (konsisten dengan selectPaper/setSize yang mereset grid). */
+  const handleMarginChange = (raw: string) => {
+    const m = clampNum(raw, 0.2, 1.5);
+    setMarginCm(m);
+    const o = chooseOrientation(size, cols, rows, m, paper);
+    if (!fitsA4(size, cols, rows, m, paper, o)) {
+      setCols(maxCols(size, m, paper, o));
+      setRows(maxRows(size, m, paper, o));
+    }
   };
 
   const resetPhotos = () => {
@@ -796,9 +815,7 @@ export default function AutoLayoutPage() {
                   max={1.5}
                   step={0.1}
                   value={marginCm}
-                  onChange={(e) =>
-                    setMarginCm(clampNum(e.target.value, 0.2, 1.5))
-                  }
+                  onChange={(e) => handleMarginChange(e.target.value)}
                 />
               </label>
               <label>
