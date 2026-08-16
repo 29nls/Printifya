@@ -216,7 +216,8 @@ export const MODULES: Module[] = [
         title: "Background Removal",
         path: "/ai-assistant/background-removal",
         icon: "✂️",
-        description: "Hapus latar belakang dan ganti warna polos otomatis.",
+        description:
+          "Hapus latar belakang otomatis (skin-tone + flood fill) dengan opsi segmen ala rembg (post-process mask, alpha matting, erode) dan ganti warna polos/transparan — komposit & encode hasil berjalan di Web Worker (UI tidak membeku; fallback thread utama), panel banding checkerboard sebelum/sesudah, unduh mask, terusan ke pas foto & Auto Layout, preferensi tersimpan dengan tombol reset.",
         Component: BackgroundRemovalPage,
       },
       {
@@ -225,7 +226,7 @@ export const MODULES: Module[] = [
         path: "/ai-assistant/enhance-photo",
         icon: "✨",
         description:
-          "Perbaiki pencahayaan, kontras, dan ketajaman otomatis berbasis histogram — slider manual, perbandingan sebelum/sesudah, terusan ke pas foto & Auto Layout, preferensi tersimpan dengan tombol reset.",
+          "Perbaiki pencahayaan, kontras, dan ketajaman otomatis berbasis histogram — slider manual, perbandingan sebelum/sesudah, pipeline resolusi penuh di Web Worker (UI tetap responsif; fallback thread utama), terusan ke pas foto & Auto Layout, preferensi tersimpan dengan tombol reset.",
         Component: EnhancePhotoPage,
       },
       {

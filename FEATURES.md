@@ -168,7 +168,7 @@ dan restorasi wajah video gaya PGTFormer.
 | Fitur | Auto Crop Face | Background Removal | Enhance Photo | Auto Layout | Upscale & Denoise | Face Enhance | Video Face Enhance | Slideshow to Video |
 |---|---|---|---|---|---|---|---|---|
 | **Mesin** | `autocrop.ts` + `detectFace` | `bgRemove.ts` (skin-tone + flood fill) | histogram + slider | modul sendiri (grid A4) | `waifu2x.ts` (heuristik) | `faceEnhance.ts` (pemulihan wajah heuristik) | `videoEnhance.ts` (per-frame `faceEnhance` + koherensi temporal + MediaRecorder) | `slideshow.ts` (coverFit/frameAt) + `recordWithAudio` |
-| **Pipeline Web Worker** (fallback thread utama bila tidak didukung) | ❌ | ❌ | ❌ | ❌ | ✅ (OffscreenCanvas) | ✅ (full-res, OffscreenCanvas) | ✅ (per-frame, tanpa OffscreenCanvas) | ❌ |
+| **Pipeline Web Worker** (fallback thread utama bila tidak didukung) | ❌ | ✅ (encode hasil — segmentasi tetap main-thread) | ✅ (full-res, OffscreenCanvas) | ❌ | ✅ (OffscreenCanvas) | ✅ (full-res, OffscreenCanvas) | ✅ (per-frame, tanpa OffscreenCanvas) | ❌ |
 | Upload | ✅ | ✅ | ✅ | ✅ (banyak foto) | ✅ (batch) | ✅ | ✅ (video) | ✅ (banyak foto) |
 | **Deteksi wajah otomatis** | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ (per frame) | ❌ |
 | **Crop rasio pas foto** | ✅ (otomatis + edit manual fallback) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
@@ -289,6 +289,27 @@ dan restorasi wajah video gaya PGTFormer.
   menjalankan pipeline dan compare langsung di thread utama (perilaku lama, hasil sama).
   Worker dibuat lazy dan di-terminate saat unmount; bitmap hasil dibebaskan eksplisit
   (`close()`) saat item dihapus / modul ditutup.
+- **Enhance Photo — enhance full-res di Web Worker**: inti murni `enhancePixels`
+  (kecerahan aditif → kontras linier sekitar 128 → unsharp mask separable) diekstrak di
+  `enhance.ts` dan menjadi SUMBER TUNGGAL untuk preview live (≤1200 px, sinkron) DAN jalur
+  full-res; `enhancePhoto.worker.ts` (pola `createWorkerClient` + `faceEnhance.worker`)
+  menerima piksel via transfer zero-copy, menjalankan `enhancePixels`, dan encode PNG via
+  `OffscreenCanvas.convertToBlob` di worker — Unduh PNG / Susun ke Auto Layout pada foto
+  ≥2000 px tidak membekukan UI (busy state + tombol nonaktif; hasil piksel identik dengan
+  jalur lama). **Fallback thread utama** bila tanpa Worker. Terusan ke Auto Layout memakai
+  data URL (blob → FileReader async — pola StrictMode/revoke sama dengan face-enhance).
+- **Background Removal — encode hasil di Web Worker (ImageBitmap)**: segmentasi
+  (`removeBackground`, skin-tone + flood fill, kerja ≤700 px) tetap di thread utama di bawah
+  indikator "Memproses…", tapi komposit warna/transparan + encode PNG full-res (`toDataURL`/
+  `toBlob` terukur 300 ms–1,2 dtk pada 12MP) dipindah ke `bgRemove.worker.ts`: thread utama
+  mengirim `ImageBitmap` hasil transparan & mask via `createImageBitmap` (terukur ~0 ms
+  blokir) + transfer zero-copy; ganti warna latar (`recolor`) dan unduh mask berjalan di
+  worker dengan busy ringan (chip nonaktif + hint "Web Worker"). Blob yang dikirim worker =
+  HASIL (transparan → piksel mentah TANPA checkerboard; warna → komposit
+  `applyBackgroundColor`), panel banding checkerboard dibangun di thread utama dari blob itu
+  (pola fill O(1)). **Fallback thread utama** bila tanpa Worker/createImageBitmap. Token
+  urutan file (`fileSeqRef`) + operasi (`opSeqRef`) membuang hasil basi — ganti file cepat
+  atau toggle opsi segmen beruntun tidak menimpa hasil terbaru dan busy state tidak flicker.
 - **Bridge antar-modul**: `pasFotoBridge` meneruskan hasil ke alur crop pas foto (semua
   modul AI + Auto Layout per foto + Upscale & Denoise per hasil; Face Enhance memilih
   ukuran 2×3/3×4/4×6 lalu modul tujuan — Pas Foto 2×3, 3×4, 4×6 — semuanya mengonsumsi
