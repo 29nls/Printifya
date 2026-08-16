@@ -126,23 +126,52 @@ export default function VideoFaceEnhancePage() {
     };
     // Durasi WebM buatan MediaRecorder kadang baru terbaca belakangan
     // (Infinity saat loadedmetadata → finite setelah durationchange), jadi
-    // polling hingga durasi valid (maks ~3 dtk) sebelum lanjut.
+    // polling hingga durasi valid sebelum lanjut sambil mendengarkan event
+    // `durationchange` (selain `loadedmetadata`) agar durasi yang baru
+    // terfinalisasi langsung terdeteksi tanpa menunggu jadwal poll berikutnya.
+    // Batas ~10 dtk (200 × 50 ms) memberi waktu browser menulis/membaca durasi
+    // container — blob WebM captureStream sering butuh lebih dari 3 dtk.
     const waitForDuration = (): Promise<number> =>
       new Promise((resolve) => {
-        let tries = 0;
+        let settled = false;
+        let pending = false;
+        const t0 = performance.now();
+        const cleanup = () => {
+          video.removeEventListener("loadedmetadata", check);
+          video.removeEventListener("durationchange", check);
+        };
+        const finish = (d: number) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(d);
+        };
+        // Rantai poll TUNGGAL (satu setTimeout aktif) + batas waktu dinding
+        // ~10 dtk: event loadedmetadata/durationchange memicu check lebih awal
+        // (deteksi instan), tapi tidak memulai rantai paralel — jadi batas
+        // waktu selalu tepat 10 dtk terlepas dari berapa kali event menyala.
+        const schedule = () => {
+          if (pending) return;
+          pending = true;
+          setTimeout(() => {
+            pending = false;
+            check();
+          }, 50);
+        };
         const check = () => {
           const d = video.duration;
           if (Number.isFinite(d) && d > 0) {
-            resolve(d);
+            finish(d);
             return;
           }
-          if (++tries > 60) {
-            resolve(0);
+          if (performance.now() - t0 > 10_000) {
+            finish(0);
             return;
           }
-          setTimeout(check, 50);
+          schedule();
         };
-        video.addEventListener("loadedmetadata", check, { once: true });
+        video.addEventListener("loadedmetadata", check);
+        video.addEventListener("durationchange", check);
         check();
       });
     video.src = url;
