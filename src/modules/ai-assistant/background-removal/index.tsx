@@ -1,13 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   applyBackgroundColor,
   removeBackground,
   type RemoveBgOptions,
 } from "./bgRemove";
+import type {
+  BgWorkerRequestNoId,
+  BgWorkerResponse,
+} from "./bgRemoveWorkerApi";
+import { createWorkerClient } from "../../shared/createWorkerClient";
 import { setPendingPasFoto } from "../../shared/pasFotoBridge";
 import { setPendingLayoutPhoto } from "../../shared/autoLayoutBridge";
-import { downloadUrl } from "../../shared/downloadUrl";
+import { blobToDataUrl, downloadUrl } from "../../shared/downloadUrl";
 import SyncedPhotoCompare from "../../shared/SyncedPhotoCompare";
 import {
   clearBgOptions,
@@ -55,6 +60,9 @@ export default function BackgroundRemovalPage() {
   const [compareCanvas, setCompareCanvas] = useState<HTMLCanvasElement | null>(
     null
   );
+  // Komposit/encode hasil berjalan di Web Worker — busy ringan (chip nonaktif
+  // + hint) saat ganti latar atau ekspor mask.
+  const [bgBusy, setBgBusy] = useState(false);
   // Opsi segmen ala rembg (--post-process-mask, -a, --alpha-matting-erode-size)
   // — default dari localStorage, disimpan ulang setiap berubah.
   const [postProcess, setPostProcess] = useState(() => loadSegOptions().postProcess);
@@ -79,7 +87,64 @@ export default function BackgroundRemovalPage() {
   // dari file lama yang selesai belakangan diabaikan agar tidak menimpa hasil
   // file terbaru (pola autoSeq di auto-crop-face / fileTokenRef di VFE).
   const fileSeqRef = useRef(0);
+  // Worker memiliki ImageBitmap hasil + mask (createImageBitmap + transfer
+  // zero-copy) — komposit & encode PNG berjalan di luar thread utama.
+  // `workerReadyRef` = hasil aktif sudah ada di worker (untuk selectBg /
+  // downloadMask jalur worker).
+  const workerReadyRef = useRef(false);
   const navigate = useNavigate();
+
+  // Web Worker jalur PENYAJIAN hasil (komposit + encode PNG) — ganti warna
+  // latar / unduh mask pada foto besar tidak membekukan UI (toDataURL full-res
+  // terukur 300 ms–1,2 dtk pada 12MP); fallback thread utama bila tanpa
+  // Worker / createImageBitmap.
+  const useWorker = typeof Worker !== "undefined";
+  const bgWorkerClient = useMemo(
+    () =>
+      createWorkerClient<BgWorkerRequestNoId, BgWorkerResponse>({
+        createWorker: () =>
+          new Worker(new URL("./bgRemove.worker.ts", import.meta.url), {
+            type: "module",
+          }),
+        errorMessage: "Worker gagal memproses foto.",
+      }),
+    []
+  );
+
+  // Hentikan worker saat komponen dilepas: tolak permintaan tertunda, terminate.
+  useEffect(() => {
+    return () => bgWorkerClient.terminate();
+  }, [bgWorkerClient]);
+
+  /** Blob PNG hasil (dari worker) → kanvas banding + data URL hasil. Blob yang
+   *  dikirim worker = HASIL (transparan → kanvas mentah; warna polos → komposit
+   *  warna), padanan `resultUrl` jalur fallback. Decode via <img> + drawImage
+   *  (universal); base64 via FileReader async; panel banding dibangun dari blob
+   *  via `buildShownCanvas` (checkerboard bila transparan) — pola fill O(1),
+   *  tanpa encode full-res di thread utama. */
+  const applyResultBlob = async (blob: Blob, hex: string | null) => {
+    const url = URL.createObjectURL(blob);
+    let canvas: HTMLCanvasElement | null = null;
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const im = new Image();
+        im.onload = () => resolve(im);
+        im.onerror = () => reject(new Error("Gagal memuat hasil."));
+        im.src = url;
+      });
+      canvas = document.createElement("canvas");
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext("2d");
+      if (ctx) ctx.drawImage(img, 0, 0);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+    // Blob sudah komposit warna (bila hex) — `buildShownCanvas` mengisi warna
+    // yang sama lalu menggambar ulang: piksel identik, biaya O(1) fill.
+    if (canvas) setCompareCanvas(buildShownCanvas(canvas, hex));
+    setResultUrl(await blobToDataUrl(blob));
+  };
 
   /** Kanvas tampilan panel banding: latar polos (`hex`) atau hasil transparan
    *  yang dikomposit di atas pola checkerboard (visualisasi alpha) — pola
@@ -173,17 +238,79 @@ export default function BackgroundRemovalPage() {
     // Token saat pemanggilan: hasil dibuang bila file yang lebih baru dipilih
     // sebelum proses selesai (hasil file lama tidak menimpa file baru).
     const token = fileSeqRef.current;
+    // Jalur worker berjalan async — busy-nya ditutup di `.finally` async,
+    // jadi `finally` sinkron di bawah HANYA untuk jalur fallback.
+    let workerPath = false;
     setProcessing(true);
     // Beri kesempatan indikator "Memproses…" ter-render dulu.
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
         if (token !== fileSeqRef.current) return;
         const { canvas, mask, foregroundRatio } = removeBackground(image, opts);
         if (token !== fileSeqRef.current) return;
-        transparentRef.current = canvas;
-        maskRef.current = mask;
         setDims({ w: canvas.width, h: canvas.height });
         const bgOpt = BG_OPTIONS.find((o) => o.id === bgId);
+        setWarning(
+          foregroundRatio < 0.01
+            ? "Seluruh gambar terdeteksi sebagai latar — coba foto dengan subjek yang jelas."
+            : foregroundRatio < 0.25
+              ? "Subjek terdeteksi kecil. Hasil terbaik untuk foto dengan latar polos (putih/biru/merah)."
+              : ""
+        );
+        // Jalur worker: hasil & mask dikirim sebagai ImageBitmap
+        // (createImageBitmap terukur ~0 ms blokir pada 12MP; transfer
+        // zero-copy) — komposit + encode PNG berjalan di luar thread utama;
+        // busy ditutup setelah blob kembali.
+        const canWorker =
+          useWorker && typeof createImageBitmap === "function";
+        if (canWorker) {
+          try {
+            const resultBmp = await createImageBitmap(canvas);
+            const maskBmp = await createImageBitmap(mask);
+            if (token !== fileSeqRef.current) {
+              // File lain dipilih saat bitmap dibuat — buang hasil basi.
+              resultBmp.close();
+              maskBmp.close();
+              return;
+            }
+            workerPath = true;
+            transparentRef.current = null;
+            maskRef.current = null;
+            setStep("result");
+            bgWorkerClient
+              .post(
+                {
+                  type: "setResult",
+                  result: resultBmp,
+                  mask: maskBmp,
+                  hex: bgOpt?.hex ?? null,
+                },
+                [resultBmp, maskBmp]
+              )
+              .then(async (res) => {
+                if (token !== fileSeqRef.current) return;
+                if (!res.ok) throw new Error(res.error);
+                workerReadyRef.current = true;
+                await applyResultBlob(res.blob, bgOpt?.hex ?? null);
+              })
+              .catch((e) => {
+                if (token !== fileSeqRef.current) return;
+                setError(
+                  e instanceof Error ? e.message : "Gagal memproses gambar."
+                );
+              })
+              .finally(() => {
+                if (token === fileSeqRef.current) setProcessing(false);
+                onDone?.();
+              });
+            return;
+          } catch {
+            // createImageBitmap gagal — jatuh ke jalur fallback thread utama.
+          }
+        }
+        // Fallback thread utama (tanpa Worker / createImageBitmap).
+        transparentRef.current = canvas;
+        maskRef.current = mask;
         const shown = buildShownCanvas(canvas, bgOpt?.hex ?? null);
         setCompareCanvas(shown);
         // `resultUrl` tetap hasil MENTAH (transparan / warna polos) — dipakai
@@ -193,18 +320,13 @@ export default function BackgroundRemovalPage() {
             ? shown.toDataURL("image/png")
             : canvas.toDataURL("image/png")
         );
-        setWarning(
-          foregroundRatio < 0.01
-            ? "Seluruh gambar terdeteksi sebagai latar — coba foto dengan subjek yang jelas."
-            : foregroundRatio < 0.25
-              ? "Subjek terdeteksi kecil. Hasil terbaik untuk foto dengan latar polos (putih/biru/merah)."
-              : ""
-        );
         setStep("result");
       } catch (e) {
         if (token !== fileSeqRef.current) return;
         setError(e instanceof Error ? e.message : "Gagal memproses gambar.");
       } finally {
+        // Jalur worker sudah return — busy ditutup di `.finally` async-nya.
+        if (workerPath) return;
         // Busy state hanya dipulihkan oleh proses TERBARU (proses basi tidak
         // boleh menimpa flag milik file yang sedang berjalan).
         if (token === fileSeqRef.current) setProcessing(false);
@@ -246,12 +368,34 @@ export default function BackgroundRemovalPage() {
     handleFile(e.dataTransfer.files?.[0]);
   };
 
-  /** Ganti latar: warna polos atau transparan (dari kanvas tersimpan).
-   *  Panel banding ikut di-redraw; unduh/terusan tetap hasil mentah. */
+  /** Ganti latar: warna polos atau transparan. Panel banding ikut di-redraw;
+   *  unduh/terusan tetap hasil mentah. Jalur worker: komposit + encode PNG di
+   *  worker (OffscreenCanvas) — tanpa pembekuan diam-diam; busy ringan tampil.
+   *  Fallback: komposit sinkron dari kanvas transparan tersimpan. */
   const selectBg = (opt: BgOption) => {
+    setBgId(opt.id);
+    if (useWorker && workerReadyRef.current) {
+      setBgBusy(true);
+      setError("");
+      const token = fileSeqRef.current;
+      bgWorkerClient
+        .post({ type: "recolor", hex: opt.hex })
+        .then(async (res) => {
+          if (token !== fileSeqRef.current) return;
+          if (!res.ok) throw new Error(res.error);
+          await applyResultBlob(res.blob, opt.hex);
+        })
+        .catch((e) => {
+          if (token !== fileSeqRef.current) return;
+          setError(e instanceof Error ? e.message : "Gagal mengganti latar.");
+        })
+        .finally(() => {
+          if (token === fileSeqRef.current) setBgBusy(false);
+        });
+      return;
+    }
     const canvas = transparentRef.current;
     if (!canvas) return;
-    setBgId(opt.id);
     const shown = buildShownCanvas(canvas, opt.hex);
     setCompareCanvas(shown);
     setResultUrl(
@@ -264,11 +408,28 @@ export default function BackgroundRemovalPage() {
     downloadUrl(resultUrl, `background-removed-${bgId}.png`);
   };
 
-  /** Ekspor mask alpha (padanan rembg `-om / --only-mask`). */
+  /** Ekspor mask alpha (padanan rembg `-om / --only-mask`). Jalur worker:
+   *  encode mask di worker (OffscreenCanvas) tanpa membekukan UI. */
   const downloadMask = () => {
+    const base = fileName.replace(/\.[^.]+$/, "") || "background-removed";
+    if (useWorker && workerReadyRef.current) {
+      setBgBusy(true);
+      bgWorkerClient
+        .post({ type: "mask" })
+        .then((res) => {
+          if (!res.ok) throw new Error(res.error);
+          downloadUrl(URL.createObjectURL(res.blob), `${base}-mask.png`);
+        })
+        .catch((e) =>
+          setError(
+            e instanceof Error ? e.message : "Gagal mengekspor mask."
+          )
+        )
+        .finally(() => setBgBusy(false));
+      return;
+    }
     const mask = maskRef.current;
     if (!mask) return;
-    const base = fileName.replace(/\.[^.]+$/, "") || "background-removed";
     downloadUrl(mask.toDataURL("image/png"), `${base}-mask.png`);
   };
 
@@ -395,6 +556,7 @@ export default function BackgroundRemovalPage() {
                   });
                   transparentRef.current = null;
                   maskRef.current = null;
+                  workerReadyRef.current = false;
                   imgRef.current = null;
                   setBgId("transparent");
                   setPostProcess(true);
@@ -413,6 +575,7 @@ export default function BackgroundRemovalPage() {
                   key={o.id}
                   type="button"
                   className={o.id === bgId ? "chip active" : "chip"}
+                  disabled={bgBusy}
                   onClick={() => selectBg(o)}
                 >
                   <span
@@ -427,6 +590,12 @@ export default function BackgroundRemovalPage() {
                 </button>
               ))}
             </div>
+            {bgBusy && (
+              <p className="hint" style={{ marginTop: 8, marginBottom: 0 }}>
+                ⏳ Mengganti latar / menyiapkan mask… (encode di Web Worker —
+                UI tetap responsif)
+              </p>
+            )}
 
             {warning && <p className="error">{warning}</p>}
 
