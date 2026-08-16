@@ -1,12 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   computePeaks,
   computeWaveStats,
   countFrames,
+  createSharedAudioState,
   formatTimecode,
   DEFAULT_VIDEO_PARAMS,
   pickWorkingSize,
   processFramePixels,
+  resolveSharedAudioBuffer,
   FRAME_SAMPLING,
   sampledBufferIndex,
   sampledFrames,
@@ -14,6 +16,14 @@ import {
   temporalBlend,
 } from "./videoEnhance";
 import { NEUTRAL_PARAMS } from "../face-enhance/faceEnhance";
+import { recordWithAudio } from "../../shared/recordWithAudio";
+
+// Batas integrasi: rekaman dimock (DOM MediaRecorder tidak ada di Node) —
+// test hanya memverifikasi KONTRAK modul: recordWithAudio menerima AudioBuffer
+// yang sama persis dengan yang di-decode untuk indikator waveform.
+vi.mock("../../shared/recordWithAudio", () => ({
+  recordWithAudio: vi.fn(),
+}));
 
 describe("pickWorkingSize — resolusi kerja video", () => {
   it("orig mempertahankan ukuran asli (dimensi genap minimal 2)", () => {
@@ -393,5 +403,86 @@ describe("formatTimecode — timecode HH:MM:SS.d untuk banding A/B", () => {
     expect(formatTimecode(-1)).toBe("0:00:00.0");
     expect(formatTimecode(NaN)).toBe("0:00:00.0");
     expect(formatTimecode(Infinity)).toBe("0:00:00.0");
+  });
+});
+
+describe("integrasi audio — waveform & rekaman berbagi buffer yang sama", () => {
+  /** AudioBuffer palsu ringan (cukup untuk computePeaks). */
+  const makeFakeBuffer = (): AudioBuffer => {
+    const data = new Float32Array(44100).fill(0.5);
+    return {
+      duration: 1,
+      length: data.length,
+      numberOfChannels: 1,
+      sampleRate: 44100,
+      getChannelData: () => data,
+    } as unknown as AudioBuffer;
+  };
+
+  it("decode sekali; buffer waveform === buffer yang diteruskan ke recordWithAudio", async () => {
+    const state = createSharedAudioState();
+    const fake = makeFakeBuffer();
+    const decode = vi.fn(async () => fake);
+
+    // Alur 1 — indikator waveform (efek [videoUrl, hasAudio]): resolve →
+    // computePeaks (data waveform nyata). Decode dijamin sukses di test ini.
+    const waveformBuffer = (await resolveSharedAudioBuffer(state, decode))!;
+    const peaks = computePeaks(waveformBuffer);
+    expect(peaks.length).toBeGreaterThan(0);
+    expect(peaks[0]).toBeCloseTo(0.5);
+
+    // Alur 2 — perekaman (run): ambil buffer dari state yang sama dan
+    // teruskan ke recordWithAudio sebagai audio latar.
+    const recordBuffer = (await resolveSharedAudioBuffer(state, decode))!;
+    recordWithAudio({
+      canvas: {} as HTMLCanvasElement,
+      fps: 15,
+      mimeType: "video/webm",
+      audio: { context: {} as AudioContext, buffer: recordBuffer },
+    });
+
+    // Decode dipanggil SEKALI (bukan dua kali)…
+    expect(decode).toHaveBeenCalledTimes(1);
+    // …dan instance yang sama persis dipakai kedua konsumen.
+    expect(recordBuffer).toBe(waveformBuffer);
+    const call = vi.mocked(recordWithAudio).mock.calls[0][0];
+    expect(call.audio?.buffer).toBe(waveformBuffer);
+  });
+
+  it("kegagalan decode di-cache: pemanggil berikutnya menerima null tanpa decode ulang", async () => {
+    const state = createSharedAudioState();
+    const decode = vi.fn(async () => null);
+    expect(await resolveSharedAudioBuffer(state, decode)).toBeNull();
+    expect(await resolveSharedAudioBuffer(state, decode)).toBeNull();
+    expect(decode).toHaveBeenCalledTimes(1);
+  });
+
+  it("reset video: objek state diganti → decode lama yang masih berjalan tidak bocor ke video baru", async () => {
+    const fakeA = makeFakeBuffer();
+    const fakeB = makeFakeBuffer();
+    let resolveA!: (b: AudioBuffer | null) => void;
+    const decodeA = vi.fn(
+      () =>
+        new Promise<AudioBuffer | null>((res) => {
+          resolveA = res;
+        })
+    );
+    const stateA = createSharedAudioState();
+    const pA = resolveSharedAudioBuffer(stateA, decodeA); // decode A berjalan
+
+    // Pengguna mengganti video SEBELUM decode A selesai (pola index.tsx:
+    // audioSharedRef.current = createSharedAudioState()).
+    const stateB = createSharedAudioState();
+    const decodeB = vi.fn(async () => fakeB);
+    const pB = resolveSharedAudioBuffer(stateB, decodeB);
+
+    resolveA(fakeA); // decode A selesai SETELAH reset
+    await pA;
+    const bufB = await pB;
+
+    // Hasil A ditulis ke objek LAMA; objek baru tidak tercemar buffer A.
+    expect(stateA.buffer).toBe(fakeA);
+    expect(stateB.buffer).toBe(fakeB);
+    expect(bufB).not.toBe(fakeA);
   });
 });

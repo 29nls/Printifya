@@ -7,6 +7,7 @@ import {
   computePeaks,
   computeWaveStats,
   countFrames,
+  createSharedAudioState,
   formatTimecode,
   DEFAULT_VIDEO_PARAMS,
   FPS_OPTIONS,
@@ -14,11 +15,13 @@ import {
   FRAME_SAMPLING,
   pickWorkingSize,
   processFramePixels,
+  resolveSharedAudioBuffer,
   RES_MODES,
   sampledBufferIndex,
   sampledFrames,
   samplingFactor,
   type FrameSampling,
+  type SharedAudioState,
   type VideoEnhanceParams,
 } from "./videoEnhance";
 import type {
@@ -201,10 +204,10 @@ export default function VideoFaceEnhancePage() {
   // memutar elemen video yang sudah pernah lewat WebAudio bisa membuat
   // drawImage berikutnya men-taint canvas (perilaku Chromium).
   const audioCtxRef = useRef<AudioContext | null>(null);
-  const audioBufferRef = useRef<AudioBuffer | null>(null);
-  // Promise decode per video (di-cache agar tidak decode ganda; di-reset saat
-  // video berganti).
-  const audioPromiseRef = useRef<Promise<AudioBuffer | null> | null>(null);
+  // State bersama AudioBuffer sumber (buffer + promise): dibagi indikator
+  // waveform DAN perekaman via `resolveSharedAudioBuffer` — keduanya menerima
+  // instance yang sama, decode hanya sekali (lihat videoEnhance.ts).
+  const audioSharedRef = useRef<SharedAudioState>(createSharedAudioState());
   // Web Worker pipeline per-frame (deteksi wajah + enhancePixels +
   // temporalBlend) — UI tetap responsif untuk video panjang; fallback thread
   // utama bila browser tanpa Worker.
@@ -250,9 +253,10 @@ export default function VideoFaceEnhancePage() {
           // abaikan
         }
         audioCtxRef.current = null;
-        audioBufferRef.current = null;
+        // Objek state DIGANTI (bukan dimutasi): decode yang masih berjalan
+        // menulis ke objek lama → tidak bocor ke video berikutnya.
+        audioSharedRef.current = createSharedAudioState();
       }
-      audioPromiseRef.current = null;
       stopSyncLoop();
       // Hentikan worker per-frame: tolak permintaan yang masih menunggu agar
       // tidak menggantung, lalu terminate.
@@ -267,35 +271,29 @@ export default function VideoFaceEnhancePage() {
 
 
   /**
-   * Pastikan AudioBuffer sumber ter-decode (sekali per video; hasil di-cache).
-   * Dipakai indikator waveform (segera setelah upload) dan `run()` (saat
-   * rekaman) — keduanya berbagi promise yang sama, jadi tidak ada decode ganda
-   * atau race. `null` bila tanpa audio / decode gagal / terlalu besar.
+   * Pastikan AudioBuffer sumber ter-decode (sekali per video; hasil di-cache
+   * di `audioSharedRef`). Dipakai indikator waveform (segera setelah upload)
+   * dan `run()` (saat rekaman) — keduanya berbagi promise yang sama, jadi
+   * tidak ada decode ganda atau race, dan menerima instance yang sama persis.
+   * `null` bila tanpa audio / decode gagal / terlalu besar.
    */
-  const ensureAudioBuffer = (): Promise<AudioBuffer | null> => {
-    if (audioBufferRef.current) return Promise.resolve(audioBufferRef.current);
-    if (!audioPromiseRef.current) {
-      audioPromiseRef.current = (async () => {
-        if (!videoUrl) return null;
-        try {
-          const raw = await (await fetch(videoUrl)).arrayBuffer();
-          const decoded = await decodeAudioBuffer(raw);
-          const bytes =
-            decoded !== null
-              ? decoded.length *
-                decoded.numberOfChannels *
-                Float32Array.BYTES_PER_ELEMENT
-              : Infinity;
-          const buf = bytes <= MAX_AUDIO_BYTES ? decoded : null;
-          audioBufferRef.current = buf;
-          return buf;
-        } catch {
-          return null;
-        }
-      })();
-    }
-    return audioPromiseRef.current;
-  };
+  const ensureAudioBuffer = (): Promise<AudioBuffer | null> =>
+    resolveSharedAudioBuffer(audioSharedRef.current, async () => {
+      if (!videoUrl) return null;
+      try {
+        const raw = await (await fetch(videoUrl)).arrayBuffer();
+        const decoded = await decodeAudioBuffer(raw);
+        const bytes =
+          decoded !== null
+            ? decoded.length *
+              decoded.numberOfChannels *
+              Float32Array.BYTES_PER_ELEMENT
+            : Infinity;
+        return bytes <= MAX_AUDIO_BYTES ? decoded : null;
+      } catch {
+        return null;
+      }
+    });
 
   /** Hentikan pemutaran cek cepat audio sumber (klik waveform) bila sedang
    *  berjalan — dipakai toggle, ganti video, dan cleanup unmount. */
@@ -317,7 +315,7 @@ export default function VideoFaceEnhancePage() {
    * dari awal; klik lagi menghentikannya. Elemen video tidak pernah diputar.
    */
   const toggleWaveAudio = () => {
-    const buf = audioBufferRef.current;
+    const buf = audioSharedRef.current.buffer;
     if (!buf) return;
     if (waveSourceRef.current) {
       stopWaveAudio();
@@ -461,8 +459,7 @@ export default function VideoFaceEnhancePage() {
       // ulang untuk video lain) — indikator waveform ikut di-reset dan akan
       // di-decode ulang oleh efek [videoUrl, hasAudio].
       stopWaveAudio();
-      audioBufferRef.current = null;
-      audioPromiseRef.current = null;
+      audioSharedRef.current = createSharedAudioState();
       setWaveform(null);
       setWaveStats(null);
       setAudioStatus("idle");
@@ -544,7 +541,7 @@ export default function VideoFaceEnhancePage() {
     void audioCtxRef.current?.resume();
     // Audio sumber (di-cache): biasanya sudah ter-decode oleh indikator
     // waveform segera setelah upload; di sini hanya menunggu promise yang sama.
-    let audioBuffer: AudioBuffer | null = audioBufferRef.current;
+    let audioBuffer: AudioBuffer | null = audioSharedRef.current.buffer;
     if (hasAudio && !audioBuffer) {
       audioBuffer = await ensureAudioBuffer();
     }
@@ -1054,8 +1051,7 @@ export default function VideoFaceEnhancePage() {
                   setError("");
                   setHasAudio(null);
                   stopWaveAudio();
-                  audioBufferRef.current = null;
-                  audioPromiseRef.current = null;
+                  audioSharedRef.current = createSharedAudioState();
                   setWaveform(null);
                   setWaveStats(null);
                   setAudioStatus("idle");

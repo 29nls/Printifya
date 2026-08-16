@@ -113,6 +113,42 @@ export function processFramePixels(
   return { out, faceDetected: box !== null };
 }
 
+/**
+ * Wadah state bersama untuk AudioBuffer sumber yang di-decode sekali per
+ * video: instance buffer + promise yang sama dibagikan SEMUA konsumen
+ * (indikator waveform dan perekaman) — tanpa decode ganda atau race.
+ */
+export interface SharedAudioState {
+  buffer: AudioBuffer | null;
+  promise: Promise<AudioBuffer | null> | null;
+}
+
+export function createSharedAudioState(): SharedAudioState {
+  return { buffer: null, promise: null };
+}
+
+/**
+ * Resolve AudioBuffer bersama dari `state` (pola `index.tsx`): hasil decode
+ * di-cache sehingga pemanggilan berikutnya — dari jalur mana pun — menerima
+ * INSTANCE yang sama persis (identitas, bukan salinan). `decode` dipanggil
+ * SEKALI; kegagalannya di-cache juga (resolve null tanpa mengulang decode).
+ * Mengganti objek `state` (reset saat video baru) membuat decode yang masih
+ * berjalan menulis ke objek LAMA — hasilnya tidak bocor ke video berikutnya.
+ */
+export function resolveSharedAudioBuffer(
+  state: SharedAudioState,
+  decode: () => Promise<AudioBuffer | null>
+): Promise<AudioBuffer | null> {
+  if (state.buffer) return Promise.resolve(state.buffer);
+  if (!state.promise) {
+    state.promise = decode().then((b) => {
+      state.buffer = b;
+      return b;
+    });
+  }
+  return state.promise;
+}
+
 /** Ukuran kerja (lebar × tinggi, dimensi genap agar aman untuk codec video).
  *  "orig" mempertahankan ukuran asli; "512"/"720" membatasi sisi terpanjang
  *  dengan mempertahankan rasio aspek (PGTFormer beroperasi di 512×512). */
