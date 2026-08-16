@@ -68,6 +68,10 @@ export default function BackgroundRemovalPage() {
   const maskRef = useRef<HTMLCanvasElement | null>(null);
   // Gambar asli yang sudah dimuat (untuk reproses saat opsi berubah).
   const imgRef = useRef<HTMLImageElement | null>(null);
+  // Token urutan file: naik setiap handleFile — hasil async (decode/pemrosesan)
+  // dari file lama yang selesai belakangan diabaikan agar tidak menimpa hasil
+  // file terbaru (pola autoSeq di auto-crop-face / fileTokenRef di VFE).
+  const fileSeqRef = useRef(0);
   const navigate = useNavigate();
 
   const clampErode = (raw: string) => {
@@ -84,11 +88,17 @@ export default function BackgroundRemovalPage() {
       setError("File harus berupa gambar (JPG, PNG, atau WebP).");
       return;
     }
+    const token = ++fileSeqRef.current;
     setFileName(file.name);
     const url = URL.createObjectURL(file);
 
     const img = new Image();
     img.onload = () => {
+      if (token !== fileSeqRef.current) {
+        // file lain sudah dipilih — buang URL ini
+        URL.revokeObjectURL(url);
+        return;
+      }
       imgRef.current = img;
       processImage(img, {
         postProcess,
@@ -97,7 +107,13 @@ export default function BackgroundRemovalPage() {
       }, () => URL.revokeObjectURL(url));
     };
     img.onerror = () => {
+      if (token !== fileSeqRef.current) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      // Tidak ada prosesImage yang dijadwalkan — pastikan busy state pulih.
       setError("Gagal membaca gambar.");
+      setProcessing(false);
       URL.revokeObjectURL(url);
     };
     img.src = url;
@@ -113,11 +129,16 @@ export default function BackgroundRemovalPage() {
     opts: RemoveBgOptions,
     onDone?: () => void
   ) => {
+    // Token saat pemanggilan: hasil dibuang bila file yang lebih baru dipilih
+    // sebelum proses selesai (hasil file lama tidak menimpa file baru).
+    const token = fileSeqRef.current;
     setProcessing(true);
     // Beri kesempatan indikator "Memproses…" ter-render dulu.
     setTimeout(() => {
       try {
+        if (token !== fileSeqRef.current) return;
         const { canvas, mask, foregroundRatio } = removeBackground(image, opts);
+        if (token !== fileSeqRef.current) return;
         transparentRef.current = canvas;
         maskRef.current = mask;
         setDims({ w: canvas.width, h: canvas.height });
@@ -136,9 +157,12 @@ export default function BackgroundRemovalPage() {
         );
         setStep("result");
       } catch (e) {
+        if (token !== fileSeqRef.current) return;
         setError(e instanceof Error ? e.message : "Gagal memproses gambar.");
       } finally {
-        setProcessing(false);
+        // Busy state hanya dipulihkan oleh proses TERBARU (proses basi tidak
+        // boleh menimpa flag milik file yang sedang berjalan).
+        if (token === fileSeqRef.current) setProcessing(false);
         onDone?.();
       }
     }, 60);

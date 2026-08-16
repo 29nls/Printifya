@@ -98,6 +98,10 @@ export default function FaceEnhancePage() {
     "download" | "pasfoto" | "layout" | null
   >(null);
   const busyRef = useRef(false);
+  // Token urutan file: naik setiap handleFile — hasil async (decode/deteksi
+  // wajah) dari file lama yang selesai belakangan diabaikan agar tidak
+  // menimpa file terbaru (pola autoSeq di auto-crop-face / fileTokenRef di VFE).
+  const fileSeqRef = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
@@ -161,11 +165,17 @@ export default function FaceEnhancePage() {
       setError("File harus berupa gambar (JPG, PNG, atau WebP).");
       return;
     }
+    const token = ++fileSeqRef.current;
     setFileName(file.name);
     const url = URL.createObjectURL(file);
 
     const image = new Image();
     image.onload = () => {
+      if (token !== fileSeqRef.current) {
+        // file lain sudah dipilih — buang URL ini
+        URL.revokeObjectURL(url);
+        return;
+      }
       setImg(image);
       setDims({ w: image.naturalWidth, h: image.naturalHeight });
       setFace(detectFace(image));
@@ -177,6 +187,10 @@ export default function FaceEnhancePage() {
       });
     };
     image.onerror = () => {
+      if (token !== fileSeqRef.current) {
+        URL.revokeObjectURL(url);
+        return;
+      }
       setError("Gagal membaca gambar.");
       URL.revokeObjectURL(url);
     };

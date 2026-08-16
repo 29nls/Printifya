@@ -55,6 +55,10 @@ export default function EnhancePhotoPage() {
    *  karena pipeline berjalan di Web Worker). */
   const [busyOp, setBusyOp] = useState<"download" | "layout" | null>(null);
   const busyRef = useRef(false);
+  // Token urutan file: naik setiap handleFile — hasil async (decode) dari file
+  // lama yang selesai belakangan diabaikan agar tidak menimpa file terbaru
+  // (pola autoSeq di auto-crop-face / fileTokenRef di VFE).
+  const fileSeqRef = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
@@ -110,11 +114,17 @@ export default function EnhancePhotoPage() {
       setError("File harus berupa gambar (JPG, PNG, atau WebP).");
       return;
     }
+    const token = ++fileSeqRef.current;
     setFileName(file.name);
     const url = URL.createObjectURL(file);
 
     const image = new Image();
     image.onload = () => {
+      if (token !== fileSeqRef.current) {
+        // file lain sudah dipilih — buang URL ini
+        URL.revokeObjectURL(url);
+        return;
+      }
       setImg(image);
       setDims({ w: image.naturalWidth, h: image.naturalHeight });
       setParams(NEUTRAL_PARAMS);
@@ -125,6 +135,10 @@ export default function EnhancePhotoPage() {
       });
     };
     image.onerror = () => {
+      if (token !== fileSeqRef.current) {
+        URL.revokeObjectURL(url);
+        return;
+      }
       setError("Gagal membaca gambar.");
       URL.revokeObjectURL(url);
     };
