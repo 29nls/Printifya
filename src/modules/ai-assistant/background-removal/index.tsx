@@ -8,6 +8,7 @@ import {
 import { setPendingPasFoto } from "../../shared/pasFotoBridge";
 import { setPendingLayoutPhoto } from "../../shared/autoLayoutBridge";
 import { downloadUrl } from "../../shared/downloadUrl";
+import SyncedPhotoCompare from "../../shared/SyncedPhotoCompare";
 import {
   clearBgOptions,
   loadLayoutPrefix,
@@ -48,6 +49,12 @@ export default function BackgroundRemovalPage() {
   // Awalan nama terusan — default dari localStorage (pola storage.ts).
   const [layoutPrefix, setLayoutPrefix] = useState(loadLayoutPrefix);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+  // Kanvas tampilan panel banding (komposit checkerboard bila transparan —
+  // visualisasi alpha; TIDAK dipakai untuk unduh/terusan, `resultUrl` tetap
+  // hasil mentah). Di-redraw saat proses selesai / opsi latar berubah.
+  const [compareCanvas, setCompareCanvas] = useState<HTMLCanvasElement | null>(
+    null
+  );
   // Opsi segmen ala rembg (--post-process-mask, -a, --alpha-matting-erode-size)
   // — default dari localStorage, disimpan ulang setiap berubah.
   const [postProcess, setPostProcess] = useState(() => loadSegOptions().postProcess);
@@ -73,6 +80,40 @@ export default function BackgroundRemovalPage() {
   // file terbaru (pola autoSeq di auto-crop-face / fileTokenRef di VFE).
   const fileSeqRef = useRef(0);
   const navigate = useNavigate();
+
+  /** Kanvas tampilan panel banding: latar polos (`hex`) atau hasil transparan
+   *  yang dikomposit di atas pola checkerboard (visualisasi alpha) — pola
+   *  `createPattern` sehingga biaya konstan di resolusi berapa pun. */
+  const buildShownCanvas = (
+    base: HTMLCanvasElement,
+    hex: string | null
+  ): HTMLCanvasElement => {
+    if (hex) return applyBackgroundColor(base, hex);
+    const out = document.createElement("canvas");
+    out.width = base.width;
+    out.height = base.height;
+    const ctx = out.getContext("2d");
+    if (!ctx) return base;
+    const sq = 16;
+    const pat = document.createElement("canvas");
+    pat.width = sq * 2;
+    pat.height = sq * 2;
+    const pctx = pat.getContext("2d");
+    if (pctx) {
+      pctx.fillStyle = "#ffffff";
+      pctx.fillRect(0, 0, sq * 2, sq * 2);
+      pctx.fillStyle = "#dddddd";
+      pctx.fillRect(0, 0, sq, sq);
+      pctx.fillRect(sq, sq, sq, sq);
+    }
+    const fill = ctx.createPattern(pat, "repeat");
+    if (fill) {
+      ctx.fillStyle = fill;
+      ctx.fillRect(0, 0, out.width, out.height);
+    }
+    ctx.drawImage(base, 0, 0);
+    return out;
+  };
 
   const clampErode = (raw: string) => {
     const n = Number(raw);
@@ -143,9 +184,13 @@ export default function BackgroundRemovalPage() {
         maskRef.current = mask;
         setDims({ w: canvas.width, h: canvas.height });
         const bgOpt = BG_OPTIONS.find((o) => o.id === bgId);
+        const shown = buildShownCanvas(canvas, bgOpt?.hex ?? null);
+        setCompareCanvas(shown);
+        // `resultUrl` tetap hasil MENTAH (transparan / warna polos) — dipakai
+        // unduh & terusan; kanvas checkerboard hanya untuk panel banding.
         setResultUrl(
           bgOpt?.hex
-            ? applyBackgroundColor(canvas, bgOpt.hex).toDataURL("image/png")
+            ? shown.toDataURL("image/png")
             : canvas.toDataURL("image/png")
         );
         setWarning(
@@ -201,16 +246,17 @@ export default function BackgroundRemovalPage() {
     handleFile(e.dataTransfer.files?.[0]);
   };
 
-  /** Ganti latar: warna polos atau transparan (dari kanvas tersimpan). */
+  /** Ganti latar: warna polos atau transparan (dari kanvas tersimpan).
+   *  Panel banding ikut di-redraw; unduh/terusan tetap hasil mentah. */
   const selectBg = (opt: BgOption) => {
     const canvas = transparentRef.current;
     if (!canvas) return;
     setBgId(opt.id);
-    if (opt.hex) {
-      setResultUrl(applyBackgroundColor(canvas, opt.hex).toDataURL("image/png"));
-    } else {
-      setResultUrl(canvas.toDataURL("image/png"));
-    }
+    const shown = buildShownCanvas(canvas, opt.hex);
+    setCompareCanvas(shown);
+    setResultUrl(
+      opt.hex ? shown.toDataURL("image/png") : canvas.toDataURL("image/png")
+    );
   };
 
   const download = () => {
@@ -310,34 +356,20 @@ export default function BackgroundRemovalPage() {
 
       {step === "result" && resultUrl && originalUrl && (
         <div className="result">
-          <div className="bg-compare">
-            <figure>
-              <figcaption>Sebelum (asli)</figcaption>
-              <img
-                src={originalUrl}
-                alt="Foto asli"
-                className="bg-preview-img"
-              />
-            </figure>
-            <figure>
-              <figcaption>
-                Sesudah{" "}
-                {bgId === "transparent"
+          <SyncedPhotoCompare
+            before={{ label: "Sebelum (asli)", src: originalUrl }}
+            after={{
+              label: `Sesudah ${
+                bgId === "transparent"
                   ? "(latar transparan)"
                   : `(latar ${
                       BG_OPTIONS.find((o) => o.id === bgId)?.name.toLowerCase() ??
                       "warna"
-                    })`}
-              </figcaption>
-              <div className="checkerboard">
-                <img
-                  src={resultUrl}
-                  alt="Hasil penghapusan latar"
-                  className="bg-preview-img"
-                />
-              </div>
-            </figure>
-          </div>
+                    })`
+              }`,
+              canvas: compareCanvas,
+            }}
+          />
 
           <section className="panel">
             <div className="file-row">
@@ -356,6 +388,7 @@ export default function BackgroundRemovalPage() {
                 onClick={() => {
                   setStep("upload");
                   setResultUrl(null);
+                  setCompareCanvas(null);
                   setOriginalUrl((prev) => {
                     if (prev) URL.revokeObjectURL(prev);
                     return null;
