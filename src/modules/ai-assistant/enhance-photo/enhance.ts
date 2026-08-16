@@ -147,24 +147,29 @@ function boxBlur(
 }
 
 /**
- * Jalankan pipeline peningkatan pada sumber.
- * `maxSize` = batas sisi terpanjang kanvas hasil (0 = ukuran asli penuh).
+ * Inti pipeline MURNI per-piksel (tanpa DOM) — Kecerahan (aditif) → Kontras
+ * (linear di sekitar 128) → Ketajaman (unsharp mask dengan box blur
+ * separable). SUMBER TUNGGAL logika piksel: `enhanceImage` (pratinjau live,
+ * thread utama) dan Web Worker full-res memakai fungsi yang sama persis,
+ * sehingga hasil kedua jalur identik.
+ *
+ * `srcW` = lebar sumber asli (px), dipakai untuk skala radius unsharp agar
+ * efek konsisten antara pratinjau kecil dan hasil ukuran penuh (full-res:
+ * srcW = w → radius 4).
  */
-export function enhanceImage(
-  source: ImageSource,
+export function enhancePixels(
+  data: Uint8ClampedArray,
+  w: number,
+  h: number,
   params: EnhanceParams,
-  maxSize = 0
-): HTMLCanvasElement {
-  const { data, w, h } = getImageDataScaled(source, maxSize);
+  srcW: number = w
+): Uint8ClampedArray {
   const out = new Uint8ClampedArray(data.length);
 
   const cf = contrastFactor(params.contrast);
   const bAdd = params.brightness * 1.28;
 
   const sharpen = params.sharpness > 0;
-  // Radius unsharp proporsional terhadap skala gambar agar efek konsisten
-  // antara pratinjau kecil dan hasil ukuran penuh.
-  const [srcW] = sourceSize(source);
   const radius = Math.max(1, Math.round((w / Math.max(1, srcW)) * 4));
   const blur = sharpen ? boxBlur(data, w, h, radius) : null;
   const amount = (params.sharpness / 100) * 1.5;
@@ -179,11 +184,30 @@ export function enhanceImage(
     out[i + 3] = data[i + 3]; // alpha dipertahankan
   }
 
+  return out;
+}
+
+/**
+ * Jalankan pipeline peningkatan pada sumber.
+ * `maxSize` = batas sisi terpanjang kanvas hasil (0 = ukuran asli penuh).
+ * Hasil piksel identik dengan jalur Web Worker (`enhancePixels` sumber tunggal).
+ */
+export function enhanceImage(
+  source: ImageSource,
+  params: EnhanceParams,
+  maxSize = 0
+): HTMLCanvasElement {
+  const { data, w, h } = getImageDataScaled(source, maxSize);
+  const [srcW] = sourceSize(source);
+  const out = enhancePixels(data, w, h, params, srcW);
+
   const canvas = document.createElement("canvas");
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas 2D tidak tersedia.");
-  ctx.putImageData(new ImageData(out, w, h), 0, 0);
+  // Salinan eksplisit agar buffer ber-backing ArrayBuffer (bukan
+  // ArrayBufferLike) — kontrak ImageData di lib DOM modern.
+  ctx.putImageData(new ImageData(new Uint8ClampedArray(out), w, h), 0, 0);
   return canvas;
 }

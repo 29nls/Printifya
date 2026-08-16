@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   computeAutoParams,
@@ -6,6 +6,11 @@ import {
   NEUTRAL_PARAMS,
   type EnhanceParams,
 } from "./enhance";
+import type {
+  EnhancePhotoWorkerRequestNoId,
+  EnhancePhotoWorkerResponse,
+} from "./enhancePhotoWorkerApi";
+import { createWorkerClient } from "../../shared/createWorkerClient";
 import { setPendingLayoutPhoto } from "../../shared/autoLayoutBridge";
 import SyncedPhotoCompare from "../../shared/SyncedPhotoCompare";
 import { downloadUrl } from "../../shared/downloadUrl";
@@ -46,9 +51,35 @@ export default function EnhancePhotoPage() {
    *  Default dari localStorage, disimpan ulang setiap berubah (pola
    *  optionsStorage.ts di Auto Crop Face). */
   const [layoutPrefix, setLayoutPrefix] = useState(loadLayoutPrefix);
+  /** Operasi full-res yang sedang berjalan (busy state — UI tetap responsif
+   *  karena pipeline berjalan di Web Worker). */
+  const [busyOp, setBusyOp] = useState<"download" | "layout" | null>(null);
+  const busyRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
+  // Web Worker pipeline full-res (enhancePixels + encode PNG) — foto besar
+  // tidak membekukan UI; fallback thread utama bila browser tanpa Worker.
+  const useWorker = typeof Worker !== "undefined";
+  const enhanceWorkerClient = useMemo(
+    () =>
+      createWorkerClient<
+        EnhancePhotoWorkerRequestNoId,
+        EnhancePhotoWorkerResponse
+      >({
+        createWorker: () =>
+          new Worker(new URL("./enhancePhoto.worker.ts", import.meta.url), {
+            type: "module",
+          }),
+        errorMessage: "Worker gagal memproses foto.",
+      }),
+    []
+  );
+
+  // Hentikan worker saat komponen dilepas: tolak permintaan tertunda, terminate.
+  useEffect(() => {
+    return () => enhanceWorkerClient.terminate();
+  }, [enhanceWorkerClient]);
   useEffect(() => {
     saveLayoutPrefix(layoutPrefix);
   }, [layoutPrefix]);
@@ -124,20 +155,91 @@ export default function EnhancePhotoPage() {
     setLayoutPrefix("enhanced-");
   };
 
-  const download = () => {
-    if (!img) return;
-    const full = enhanceImage(img, params);
-    downloadUrl(full.toDataURL("image/png"), "enhanced-photo.png");
+  /**
+   * Proses resolusi penuh → Blob PNG. Jalur worker: drawImage + getImageData
+   * di thread utama (ringan), lalu `enhancePixels` + encode PNG
+   * (`convertToBlob`) semua di Web Worker → hasil keluar sebagai Blob.
+   * Fallback: `enhanceImage` sinkron + `toBlob` (jalur lama) bila browser
+   * tanpa Worker. Hasil identik dengan jalur lama — `enhancePixels` adalah
+   * sumber tunggal logika piksel.
+   */
+  const processFullRes = async (): Promise<Blob> => {
+    if (!img) throw new Error("Tidak ada foto.");
+    if (!useWorker) {
+      const canvas = enhanceImage(img, params);
+      return new Promise<Blob>((resolve, reject) =>
+        canvas.toBlob(
+          (b) => (b ? resolve(b) : reject(new Error("Gagal membuat PNG."))),
+          "image/png"
+        )
+      );
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) throw new Error("Canvas 2D tidak tersedia.");
+    ctx.drawImage(img, 0, 0);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const buffer = imageData.data.buffer as ArrayBuffer;
+    const res = await enhanceWorkerClient.post(
+      {
+        type: "process",
+        pixels: buffer,
+        w: canvas.width,
+        h: canvas.height,
+        params,
+      },
+      [buffer]
+    );
+    if (!res.ok) throw new Error(res.error);
+    return res.blob;
   };
 
+  /** Bungkus operasi full-res dengan busy state + guard anti-konkurensi. */
+  const withBusy =
+    (op: "download" | "layout", fn: () => Promise<void>) =>
+    async () => {
+      if (busyRef.current) return;
+      busyRef.current = true;
+      setBusyOp(op);
+      setError("");
+      try {
+        await fn();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Gagal memproses foto.");
+      } finally {
+        busyRef.current = false;
+        setBusyOp(null);
+      }
+    };
+
+  const download = withBusy("download", async () => {
+    const blob = await processFullRes();
+    downloadUrl(URL.createObjectURL(blob), "enhanced-photo.png");
+  });
+
+  /** Blob hasil → data URL (Auto Layout memakai data URL: modul tujuan bahkan
+   *  me-revoke object URL masuknya saat double-mount StrictMode, jadi blob URL
+   *  tidak aman untuk bridge). Base64 via FileReader berjalan di luar thread
+   *  utama (baca blob async) — jauh lebih ringan daripada `canvas.toDataURL`
+   *  sinkron pada resolusi penuh. */
+  const blobToDataUrl = (blob: Blob): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(fr.result as string);
+      fr.onerror = () =>
+        reject(new Error("Gagal mengonversi hasil ke data URL."));
+      fr.readAsDataURL(blob);
+    });
+
   /** Kirim hasil enhance (resolusi penuh) ke Auto Layout untuk lembar A4. */
-  const forwardToLayout = () => {
-    if (!img) return;
-    const full = enhanceImage(img, params);
+  const forwardToLayout = withBusy("layout", async () => {
+    const blob = await processFullRes();
     const base = fileName.replace(/\.[^.]+$/, "") || "enhanced-photo";
-    setPendingLayoutPhoto(full.toDataURL("image/png"), `${layoutPrefix}${base}`);
+    setPendingLayoutPhoto(await blobToDataUrl(blob), `${layoutPrefix}${base}`);
     navigate("/ai-assistant/auto-layout");
-  };
+  });
 
   return (
     <div className="enhance-page">
@@ -295,17 +397,33 @@ export default function EnhancePhotoPage() {
             </div>
 
             <div className="result-actions">
-              <button type="button" className="btn btn-primary" onClick={download}>
-                ⬇️ Unduh PNG (ukuran penuh)
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={download}
+                disabled={busyOp !== null}
+              >
+                {busyOp === "download"
+                  ? "⏳ Memproses…"
+                  : "⬇️ Unduh PNG (ukuran penuh)"}
               </button>
               <button
                 type="button"
                 className="btn btn-primary"
                 onClick={forwardToLayout}
+                disabled={busyOp !== null}
               >
-                🧩 Susun ke Lembar A4
+                {busyOp === "layout"
+                  ? "⏳ Memproses…"
+                  : "🧩 Susun ke Lembar A4"}
               </button>
             </div>
+            {busyOp && (
+              <p className="hint" style={{ marginTop: 8, marginBottom: 0 }}>
+                ⏳ Memproses resolusi penuh di <strong>Web Worker</strong> — UI
+                tetap responsif; hasilnya identik dengan jalur lama.
+              </p>
+            )}
           </section>
         </>
       )}
