@@ -21,6 +21,7 @@ import {
   buildHtmlSheet,
   printHtmlSheet,
 } from "../../print-center/printer-lokal/printHtml";
+import { blobToDataUrl } from "../../shared/downloadUrl";
 import { setPendingPasFoto } from "../../shared/pasFotoBridge";
 import {
   clearPendingLayoutPhotos,
@@ -444,31 +445,13 @@ export default function AutoLayoutPage() {
     });
   };
 
-  /** Blob URL → data URL mandiri (tahan terhadap revoke object URL). */
-  const toDataUrl = (url: string): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const image = new Image();
-      image.onload = () => {
-        const canvas = document.createElement("canvas");
-        canvas.width = image.naturalWidth;
-        canvas.height = image.naturalHeight;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) {
-          reject(new Error("Canvas 2D tidak tersedia."));
-          return;
-        }
-        ctx.drawImage(image, 0, 0);
-        resolve(canvas.toDataURL("image/png"));
-      };
-      image.onerror = () => reject(new Error("Gagal memuat foto."));
-      image.src = url;
-    });
-
-  /** Teruskan foto terpilih ke alur Pas Foto 3x4. */
+  /** Teruskan foto terpilih ke alur Pas Foto 3x4 — blob/data URL → data URL
+   *  mandiri via `blobToDataUrl` bersama (fetch bekerja untuk keduanya dan
+   *  menjaga byte asli, tanpa re-encode canvas). */
   const forwardPhoto = async (photo: PhotoItem) => {
     setError("");
     try {
-      const dataUrl = await toDataUrl(photo.url);
+      const dataUrl = await blobToDataUrl(await fetch(photo.url).then((r) => r.blob()));
       setPendingPasFoto(dataUrl);
       navigate("/photo-studio/pas-foto-3x4");
     } catch (e) {
