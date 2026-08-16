@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { type FaceEnhanceParams } from "../../shared/facePipeline";
 import { setPendingPasFoto } from "../../shared/pasFotoBridge";
@@ -6,39 +6,26 @@ import { setPendingLayoutPhoto } from "../../shared/autoLayoutBridge";
 import { downloadUrl } from "../../shared/downloadUrl";
 import {
   countFrames,
-  createFpsMeter,
   formatEta,
   formatTimecode,
   DEFAULT_VIDEO_PARAMS,
   FPS_OPTIONS,
   FORMATS,
   FRAME_SAMPLING,
-  pickWorkingSize,
-  processFramePixels,
   RES_MODES,
-  sampledBufferIndex,
   sampledFrames,
-  samplingFactor,
   type FrameSampling,
   type VideoEnhanceParams,
 } from "./videoEnhance";
-import type {
-  FaceWorkerRequestNoId,
-  FaceWorkerResponse,
-} from "./faceWorkerApi";
-import { createWorkerClient } from "../../shared/createWorkerClient";
-import { makeAudioContext, useWaveformAudio } from "./useWaveformAudio";
+import { useWaveformAudio } from "./useWaveformAudio";
 import { useSyncCompare } from "./useSyncCompare";
+import { useVideoEnhanceRun, type VideoMeta } from "./useVideoEnhanceRun";
 import {
   clearVideoOptions,
   loadVideoPrefs,
   saveVideoPrefs,
 } from "./optionsStorage";
 import ResetPreferencesButton from "../../shared/ResetPreferencesButton";
-import {
-  recordWithAudio,
-  type AudioRecorder,
-} from "../../shared/recordWithAudio";
 import "../../photo-studio/shared/style.css";
 import "./style.css";
 
@@ -68,33 +55,6 @@ function formatWaveTip(s: {
   return `Durasi ${s.duration.toFixed(1)} dtk · Puncak ${db} · ${s.channels} kanal`;
 }
 
-interface VideoMeta {
-  w: number;
-  h: number;
-  duration: number;
-}
-
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
-/** Pindahkan video ke waktu `t`; resolve saat frame tersaji (atau timeout
- *  pengaman 250 ms — browser tertentu menolak seek saat di-clamp ke durasi). */
-function seekTo(video: HTMLVideoElement, t: number): Promise<void> {
-  return new Promise((resolve) => {
-    if (Math.abs(video.currentTime - t) < 0.005) {
-      resolve();
-      return;
-    }
-    const done = () => resolve();
-    video.addEventListener("seeked", done, { once: true });
-    video.currentTime = t;
-    window.setTimeout(() => {
-      video.removeEventListener("seeked", done);
-      resolve();
-    }, 250);
-  });
-}
-
-
 export default function VideoFaceEnhancePage() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [fileName, setFileName] = useState("");
@@ -108,85 +68,44 @@ export default function VideoFaceEnhancePage() {
   const [layoutPrefix, setLayoutPrefix] = useState(
     () => loadVideoPrefs().layoutPrefix
   );
-  const [processing, setProcessing] = useState(false);
-  const [progress, setProgress] = useState<{
-    done: number;
-    total: number;
-    /** Kecepatan pemrosesan nyata (frame/detik, jendela geser ~2 dtk). */
-    fps: number;
-    /** Perkiraan sisa waktu (dtk) berdasarkan fps saat ini. */
-    etaSec: number;
-  } | null>(null);
-  const [resultUrl, setResultUrl] = useState<string | null>(null);
-  const [resultExt, setResultExt] = useState<"webm" | "mp4">("webm");
-  const [faceFrames, setFaceFrames] = useState(0);
   // null = belum diketahui, true/false = video sumber punya/tanpa audio.
   const [hasAudio, setHasAudio] = useState<boolean | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const fileTokenRef = useRef(0);
-  const cancelledRef = useRef(false);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  // Web Worker pipeline per-frame (deteksi wajah + enhancePixels +
-  // temporalBlend) — UI tetap responsif untuk video panjang; fallback thread
-  // utama bila browser tanpa Worker.
-  const useWorker = typeof Worker !== "undefined";
-  const faceWorkerClient = useMemo(
-    () =>
-      createWorkerClient<FaceWorkerRequestNoId, FaceWorkerResponse>({
-        createWorker: () =>
-          new Worker(new URL("./faceWorker.ts", import.meta.url), {
-            type: "module",
-          }),
-        errorMessage: "Worker gagal memproses frame.",
-      }),
-    []
-  );
   const navigate = useNavigate();
   const wave = useWaveformAudio(videoUrl, hasAudio);
-  const sync = useSyncCompare(resultUrl);
+  const runCtl = useVideoEnhanceRun({
+    meta,
+    params,
+    hasAudio,
+    videoRef,
+    audioCtxRef: wave.audioCtxRef,
+    audioSharedRef: wave.audioSharedRef,
+    ensureAudioBuffer: wave.ensureAudioBuffer,
+    setError,
+  });
+  const sync = useSyncCompare(runCtl.resultUrl);
 
   // Persist semua opsi + awalan setiap berubah.
   useEffect(() => {
     saveVideoPrefs({ params, layoutPrefix });
   }, [params, layoutPrefix]);
 
-  // URL terbaru sumber & hasil — dibaca saat unmount (cleanup di bawah),
-  // agar revoke hanya terjadi saat komponen benar-benar dilepas, BUKAN saat
-  // videoUrl/resultUrl berubah (cleanup lama ikut me-revoke blob sumber setiap
-  // kali hasil baru dibuat — membuat run berikutnya kehilangan audio).
-  const urlsRef = useRef({ videoUrl, resultUrl });
-  urlsRef.current = { videoUrl, resultUrl };
-  // Bersihkan object URL + stop perekam saat komponen dilepas. Cleanup audio
-  // (playback cek cepat, AudioContext, buffer) & loop sinkronisasi banding
-  // dimiliki hook useWaveformAudio / useSyncCompare (ikut jalan saat unmount).
+  // URL sumber terbaru — dibaca saat unmount (cleanup di bawah), agar revoke
+  // hanya terjadi saat komponen benar-benar dilepas, BUKAN saat videoUrl
+  // berubah (cleanup lama ikut me-revoke blob sumber setiap kali hasil baru
+  // dibuat — membuat run berikutnya kehilangan audio). Cleanup hasil/recorder/
+  // worker dimiliki useVideoEnhanceRun; cleanup audio & sinkronisasi banding
+  // dimiliki useWaveformAudio / useSyncCompare (ikut jalan saat unmount).
+  const videoUrlRef = useRef(videoUrl);
+  videoUrlRef.current = videoUrl;
   useEffect(() => {
     return () => {
-      cancelledRef.current = true;
-      try {
-        recorderRef.current?.stop();
-      } catch {
-        // abaikan
-      }
-      // Hentikan worker per-frame: tolak permintaan yang masih menunggu agar
-      // tidak menggantung, lalu terminate.
-      faceWorkerClient.terminate();
-      const { videoUrl: vUrl, resultUrl: rUrl } = urlsRef.current;
+      const vUrl = videoUrlRef.current;
       if (vUrl) URL.revokeObjectURL(vUrl);
-      if (rUrl) URL.revokeObjectURL(rUrl);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-
-
-
-  const mp4Supported =
-    typeof MediaRecorder !== "undefined" &&
-    MediaRecorder.isTypeSupported("video/mp4");
-  // Format efektif: MP4 hanya bila didukung browser.
-  const effFormat: "webm" | "mp4" =
-    params.format === "mp4" && mp4Supported ? "mp4" : "webm";
 
   const handleFile = (file?: File | null) => {
     setError("");
@@ -199,9 +118,9 @@ export default function VideoFaceEnhancePage() {
     if (!video) return;
     setFileName(file.name);
     const url = URL.createObjectURL(file);
-    const token = ++fileTokenRef.current;
+    const token = ++runCtl.fileTokenRef.current;
     video.onerror = () => {
-      if (token !== fileTokenRef.current) return;
+      if (token !== runCtl.fileTokenRef.current) return;
       setError("Gagal membaca video.");
       URL.revokeObjectURL(url);
     };
@@ -229,7 +148,7 @@ export default function VideoFaceEnhancePage() {
     video.src = url;
     video.load();
     void waitForDuration().then((duration) => {
-      if (token !== fileTokenRef.current) {
+      if (token !== runCtl.fileTokenRef.current) {
         // file lain sudah dipilih — buang URL ini
         URL.revokeObjectURL(url);
         return;
@@ -268,11 +187,7 @@ export default function VideoFaceEnhancePage() {
         if (prev) URL.revokeObjectURL(prev);
         return url;
       });
-      setResultUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return null;
-      });
-      setProgress(null);
+      runCtl.clearResult();
     });
   };
 
@@ -292,287 +207,6 @@ export default function VideoFaceEnhancePage() {
     setParams({ ...DEFAULT_VIDEO_PARAMS });
     setLayoutPrefix("video-");
   };
-
-  /** Proses seluruh video frame per frame → rekam ke WebM/MP4 via MediaRecorder.
-   *  Dua fase agar durasi hasil ≈ durasi sumber: (1) semua frame diproses ke
-   *  buffer (tanpa merekam), lalu (2) buffer di-putImageData ke canvas yang
-   *  direkam pada jadwal fps yang tepat — putImageData jauh lebih cepat daripada
-   *  drawImage+enhance, jadi fase rekam selalu mengikuti jadwal. Untuk video
-   *  sangat panjang (frame > ~180 MB) fallback ke rekaman live waktu-nyata. */
-  const run = async () => {
-    const video = videoRef.current;
-    if (!video || !meta || processing) return;
-    setError("");
-    const { w, h } = pickWorkingSize(meta.w, meta.h, params.resMode);
-    const total = countFrames(meta.duration, params.fps);
-    if (total <= 0) {
-      setError("Durasi video tidak valid.");
-      return;
-    }
-    // Sampling frame: proses sebagian frame (semua/setengah/sepertiga) untuk
-    // video panjang — tiap frame hasil ditahan beberapa slot output, jadi
-    // durasi & fps hasil tetap sama, hanya kehalusan gerak berkurang.
-    const sampling = params.frameSampling;
-    const sf = samplingFactor(sampling);
-    const processTotal = sampledFrames(total, sampling);
-    if (typeof MediaRecorder === "undefined") {
-      setError("Browser tidak mendukung perekaman video (MediaRecorder).");
-      return;
-    }
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    if (!ctx) {
-      setError("Canvas 2D tidak tersedia.");
-      return;
-    }
-    if (!("captureStream" in canvas)) {
-      setError("Browser tidak mendukung perekaman canvas (captureStream).");
-      return;
-    }
-    const mime = effFormat === "mp4" ? "video/mp4" : "video/webm";
-    // --- Audio sumber (WebAudio → MediaStreamDestination) ---
-    // Context dibuat/resume DALAM gestur klik. Audio sumber di-decode sekali
-    // menjadi AudioBuffer lalu diputar ulang via BufferSource saat rekam —
-    // output tidak senyap, tanpa memutar elemen video (hindari taint canvas).
-    if (hasAudio && !wave.audioCtxRef.current) {
-      wave.audioCtxRef.current = makeAudioContext();
-    }
-    void wave.audioCtxRef.current?.resume();
-    // Audio sumber (di-cache): biasanya sudah ter-decode oleh indikator
-    // waveform segera setelah upload; di sini hanya menunggu promise yang sama.
-    let audioBuffer: AudioBuffer | null = wave.audioSharedRef.current.buffer;
-    if (hasAudio && !audioBuffer) {
-      audioBuffer = await wave.ensureAudioBuffer();
-    }
-    /** Buat perekam canvas + audio (helper bersama recordWithAudio). */
-    const startRecorder = (): AudioRecorder => {
-      const rec = recordWithAudio({
-        canvas,
-        fps: params.fps,
-        mimeType: mime,
-        audio:
-          wave.audioCtxRef.current && audioBuffer
-            ? { context: wave.audioCtxRef.current, buffer: audioBuffer }
-            : null,
-      });
-      recorderRef.current = rec.recorder;
-      return rec;
-    };
-
-    const frameBytes = w * h * 4;
-    const canPrerender = processTotal * frameBytes <= 180 * 1024 * 1024;
-    // Token file saat run dimulai — bila video diganti di tengah proses
-    // (handleFile menaikkan fileTokenRef), run DIBATALKAN: loop berhenti dan
-    // hasil parsial dibuang tanpa menyentuh state milik file baru. Tanpa ini,
-    // loop tetap menggambar dari elemen video yang sumber datanya sudah ditukar
-    // (output korup diam-diam) lalu menimpa hasil file baru dengan blob lama.
-    const token = fileTokenRef.current;
-    const aborted = () =>
-      cancelledRef.current || token !== fileTokenRef.current;
-    cancelledRef.current = false;
-    setProcessing(true);
-    // Kecepatan nyata: meter jendela geser di-feed hanya saat frame BENAR-BENAR
-    // diproses (bukan fase tulis putImageData) → fps/ETA tidak menyesatkan.
-    const fpsMeter = createFpsMeter();
-    let lastFps = 0;
-    let lastEta = 0;
-    const updateProgress = (done: number, processed: boolean) => {
-      if (processed) {
-        lastFps = fpsMeter.mark();
-        lastEta = lastFps > 0 ? (processTotal - done) / lastFps : 0;
-      }
-      setProgress({
-        done,
-        total: processTotal,
-        fps: lastFps,
-        etaSec: lastEta,
-      });
-    };
-    updateProgress(0, false);
-    // Frame hasil sebelumnya — hanya dipakai fallback thread utama (di worker,
-    // prev dipegang worker dan di-reset via pesan "reset").
-    let prev: Uint8ClampedArray | null = null;
-    let faceCount = 0;
-
-    // Awali tiap run dengan prev kosong agar koherensi temporal tidak bocor
-    // dari run/video sebelumnya (worker menyimpan prev secara internal).
-    if (useWorker) {
-      try {
-        await faceWorkerClient.post({ type: "reset" });
-      } catch {
-        // worker gagal — proses di thread utama sebagai fallback
-      }
-    }
-
-    /** Proses satu frame: seek → draw → pipeline (worker atau thread utama).
-     *  Pipeline berat (deteksi wajah + enhancePixels + temporalBlend) berjalan
-     *  di Web Worker; thread utama hanya seek/draw/getImageData yang ringan. */
-    const processOne = async (i: number): Promise<Uint8ClampedArray | null> => {
-      if (aborted()) return null;
-      const t = Math.min(meta.duration, i / params.fps);
-      await seekTo(video, t);
-      if (aborted()) return null;
-      ctx.drawImage(video, 0, 0, w, h);
-      const img = ctx.getImageData(0, 0, w, h);
-      if (useWorker) {
-        // Piksel dikirim via transfer (tanpa salin); hasil di-transfer balik.
-        const res = await faceWorkerClient.post(
-          {
-            type: "processFrame",
-            pixels: img.data.buffer,
-            w,
-            h,
-            params,
-            temporal: params.temporal,
-          },
-          [img.data.buffer]
-        );
-        if (res.type !== "processFrame" || !res.ok) {
-          throw new Error(
-            res.type === "processFrame"
-              ? res.error
-              : "Worker tidak merespons permintaan frame."
-          );
-        }
-        const out = new Uint8ClampedArray(res.pixels);
-        if (res.faceDetected) faceCount++;
-        return out;
-      }
-      // Fallback thread utama (browser tanpa Worker) — sumber tunggal yang
-      // sama dengan worker, jadi hasil identik.
-      const { out, faceDetected } = processFramePixels(
-        img.data,
-        w,
-        h,
-        params,
-        params.temporal,
-        prev
-      );
-      prev = out;
-      if (faceDetected) faceCount++;
-      return out;
-    };
-
-    let recorder: AudioRecorder | null = null;
-    try {
-      if (canPrerender) {
-        // Fase 1: proses frame terpilih (setiap `sf`-slot) ke buffer (recorder
-        // BELUM mulai — tidak ada kanvas kosong yang ikut terekam).
-        const buffers: Uint8ClampedArray[] = [];
-        for (let j = 0; j < processTotal; j++) {
-          if (aborted()) break;
-          const out = await processOne(j * sf);
-          if (out) buffers.push(out);
-          updateProgress(j + 1, true);
-          if (j % 3 === 2) await new Promise((r) => setTimeout(r, 0));
-        }
-        // Fase 2: mulai rekam, lalu putImageData buffer pada jadwal fps yang
-        // tepat — tiap frame hasil ditahan `sf` slot berturut-turut (durasi
-        // output ≈ sumber; kehalusan gerak berkurang sesuai sampling).
-        // putImageData jauh lebih cepat daripada drawImage+enhance, jadi fase
-        // ini selalu mengikuti waktu nyata. Audio diputar ulang dari buffer via
-        // BufferSource → destination agar track audio asli mengalir (video
-        // sumber tetap pause).
-        if (!aborted() && buffers.length === processTotal) {
-          recorder = startRecorder();
-          const t0 = performance.now();
-          const interval = 1000 / params.fps;
-          for (let i = 0; i < total; i++) {
-            if (aborted()) break;
-            const wait = t0 + i * interval - performance.now();
-            if (wait > 1) await sleep(wait);
-            const idx = Math.min(processTotal - 1, sampledBufferIndex(i, sampling));
-            ctx.putImageData(
-              new ImageData(new Uint8ClampedArray(buffers[idx]), w, h),
-              0,
-              0
-            );
-            if (i % 5 === 4 || i === total - 1) {
-              updateProgress(idx + 1, false);
-            }
-          }
-        }
-      } else {
-        // Video panjang: rekam live sambil proses (bila pemrosesan lebih
-        // lambat dari fps, durasi output bisa lebih panjang — dijelaskan di UI).
-        recorder = startRecorder();
-        const t0 = performance.now();
-        const interval = 1000 / params.fps;
-        for (let j = 0; j < processTotal; j++) {
-          if (aborted()) break;
-          const out = await processOne(j * sf);
-          if (!out) break;
-          // Tahan frame hasil selama `sf` slot output (durasi tetap ≈ sumber).
-          for (let k = 0; k < sf; k++) {
-            const i = j * sf + k;
-            if (i >= total) break;
-            const wait = t0 + i * interval - performance.now();
-            if (wait > 1) await sleep(wait);
-            ctx.putImageData(
-              new ImageData(new Uint8ClampedArray(out), w, h),
-              0,
-              0
-            );
-          }
-          updateProgress(j + 1, true);
-        }
-      }
-    } catch (e) {
-      // Error tak terduga (mis. canvas tainted oleh data lintas-origin) —
-      // jangan biarkan UI macet di "Memproses…"; tampilkan pesan dan
-      // kembalikan tombol ke kondisi semula (state di-reset di bawah).
-      // Run basi (video sudah diganti) tidak boleh menimpa UI file baru.
-      if (!aborted()) {
-        setError(
-          e instanceof Error
-            ? e.message
-            : "Gagal memproses video (error tak dikenal)."
-        );
-      }
-    } finally {
-      // Pulihkan elemen sumber (pause + mute) setelah rekam selesai/dibatalkan.
-      try {
-        video.pause();
-        video.muted = true;
-      } catch {
-        // abaikan
-      }
-      if (recorder) {
-        try {
-          // Hentikan audio + perekaman, kumpulkan chunk, hentikan track.
-          await recorder.stop();
-        } catch {
-          // recorder sudah berhenti / gagal — buang hasil parsial
-        }
-        recorderRef.current = null;
-      }
-    }
-    if (aborted() || !recorder) {
-      // dibatalkan (Batal / video diganti) / recorder tidak pernah mulai —
-      // buang hasil parsial, jangan sentuh state milik file baru
-      setProcessing(false);
-      setProgress(null);
-      return;
-    }
-    const blob = new Blob(recorder.chunks, { type: mime });
-    const url = URL.createObjectURL(blob);
-    setResultUrl((prevUrl) => {
-      if (prevUrl) URL.revokeObjectURL(prevUrl);
-      return url;
-    });
-    setResultExt(effFormat);
-    setFaceFrames(faceCount);
-    setProcessing(false);
-    setProgress(null);
-  };
-
-  /** Hentikan batch: frame yang sedang berjalan diselesaikan, sisanya berhenti. */
-  const cancel = () => {
-    cancelledRef.current = true;
-  };
-
 
   /** Ambil frame video hasil saat ini (posisi pemutaran pengguna) → data URL. */
   const captureResultFrame = (): Promise<string> => {
@@ -618,9 +252,13 @@ export default function VideoFaceEnhancePage() {
   };
 
   const download = () => {
-    if (!resultUrl) return;
+    if (!runCtl.resultUrl) return;
     const base = fileName.replace(/\.[^.]+$/, "") || "video-face";
-    downloadUrl(resultUrl, `${base}-face-restored.${resultExt}`, { revoke: false });
+    downloadUrl(
+      runCtl.resultUrl,
+      `${base}-face-restored.${runCtl.resultExt}`,
+      { revoke: false }
+    );
   };
 
   return (
@@ -782,15 +420,11 @@ export default function VideoFaceEnhancePage() {
                     if (prev) URL.revokeObjectURL(prev);
                     return null;
                   });
-                  setResultUrl((prev) => {
-                    if (prev) URL.revokeObjectURL(prev);
-                    return null;
-                  });
                   setMeta(null);
-                  setProgress(null);
                   setError("");
                   setHasAudio(null);
                   wave.resetAudioForNewVideo();
+                  runCtl.clearResult();
                 }}
               >
                 🔄 Video Lain
@@ -802,20 +436,22 @@ export default function VideoFaceEnhancePage() {
                 <button
                   type="button"
                   className="btn btn-primary"
-                  disabled={processing}
-                  onClick={run}
+                  disabled={runCtl.processing}
+                  onClick={runCtl.run}
                 >
-                  {processing ? `Memproses… (${progress?.done ?? 0}/${progress?.total ?? 0})` : "🚀 Pulihkan Video"}
+                  {runCtl.processing
+                    ? `Memproses… (${runCtl.progress?.done ?? 0}/${runCtl.progress?.total ?? 0})`
+                    : "🚀 Pulihkan Video"}
                 </button>
-                {processing && (
-                  <button type="button" className="btn" onClick={cancel}>
+                {runCtl.processing && (
+                  <button type="button" className="btn" onClick={runCtl.cancel}>
                     ✋ Batal
                   </button>
                 )}
                 <button
                   type="button"
                   className="btn"
-                  disabled={processing}
+                  disabled={runCtl.processing}
                   onClick={resetParams}
                 >
                   ↺ Reset
@@ -928,7 +564,7 @@ export default function VideoFaceEnhancePage() {
                   Format video
                   <select
                     className="tool-select"
-                    value={effFormat}
+                    value={runCtl.effFormat}
                     onChange={(e) =>
                       setParams((p) => ({
                         ...p,
@@ -937,9 +573,13 @@ export default function VideoFaceEnhancePage() {
                     }
                   >
                     {FORMATS.map((f) => (
-                      <option key={f} value={f} disabled={f === "mp4" && !mp4Supported}>
+                      <option
+                        key={f}
+                        value={f}
+                        disabled={f === "mp4" && !runCtl.mp4Supported}
+                      >
                         {f.toUpperCase()}
-                        {f === "mp4" && !mp4Supported ? " (tak didukung)" : ""}
+                        {f === "mp4" && !runCtl.mp4Supported ? " (tak didukung)" : ""}
                       </option>
                     ))}
                   </select>
@@ -971,25 +611,25 @@ export default function VideoFaceEnhancePage() {
                 </label>
               </div>
 
-              {processing && progress && (
+              {runCtl.processing && runCtl.progress && (
                 <div className="vfe-progress">
                   <div className="vfe-progress-bar">
                     <div
                       className="vfe-progress-fill"
                       style={{
-                        width: `${(progress.done / progress.total) * 100}%`,
+                        width: `${(runCtl.progress.done / runCtl.progress.total) * 100}%`,
                       }}
                     />
                   </div>
                   <span>
-                    Frame {progress.done} / {progress.total} (
-                    {Math.round((progress.done / progress.total) * 100)}%)
-                    {progress.fps > 0 && (
+                    Frame {runCtl.progress.done} / {runCtl.progress.total} (
+                    {Math.round((runCtl.progress.done / runCtl.progress.total) * 100)}%)
+                    {runCtl.progress.fps > 0 && (
                       <span className="vfe-speed">
                         {" "}
-                        · {progress.fps >= 10 ? Math.round(progress.fps) : progress.fps.toFixed(1)} fps
-                        {progress.etaSec > 0 && (
-                          <> · sisa ~{formatEta(progress.etaSec)}</>
+                        · {runCtl.progress.fps >= 10 ? Math.round(runCtl.progress.fps) : runCtl.progress.fps.toFixed(1)} fps
+                        {runCtl.progress.etaSec > 0 && (
+                          <> · sisa ~{formatEta(runCtl.progress.etaSec)}</>
                         )}
                       </span>
                     )}
@@ -1037,7 +677,7 @@ export default function VideoFaceEnhancePage() {
             </div>
           </section>
 
-          {resultUrl && (
+          {runCtl.resultUrl && (
             <section className="panel">
               <div className="bg-compare">
                 <figure>
@@ -1071,7 +711,7 @@ export default function VideoFaceEnhancePage() {
                   </figcaption>
                   <video
                     ref={sync.resVideoRef}
-                    src={resultUrl}
+                    src={runCtl.resultUrl}
                     controls
                     muted={sync.compareMuted}
                     className="bg-preview-img"
@@ -1109,11 +749,13 @@ export default function VideoFaceEnhancePage() {
               </p>
               <p
                 className={
-                  faceFrames > 0 ? "face-note face-found" : "face-note face-miss"
+                  runCtl.faceFrames > 0
+                    ? "face-note face-found"
+                    : "face-note face-miss"
                 }
               >
-                {faceFrames > 0
-                  ? `😀 Wajah terdeteksi di ${faceFrames} dari ${sampledFrames(
+                {runCtl.faceFrames > 0
+                  ? `😀 Wajah terdeteksi di ${runCtl.faceFrames} dari ${sampledFrames(
                       countFrames(meta.duration, params.fps),
                       params.frameSampling
                     )} frame — pemulihan difokuskan ke area wajah per frame (parsing-guided) dengan koherensi temporal ${params.temporal}.`
@@ -1126,7 +768,7 @@ export default function VideoFaceEnhancePage() {
               </p>
               <div className="result-actions">
                 <button type="button" className="btn btn-primary" onClick={download}>
-                  ⬇️ Unduh {resultExt.toUpperCase()}
+                  ⬇️ Unduh {runCtl.resultExt.toUpperCase()}
                 </button>
                 <button
                   type="button"
