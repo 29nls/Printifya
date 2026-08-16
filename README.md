@@ -76,14 +76,33 @@ lintas modul tanpa salin-tempel. Peta singkat untuk pendatang baru:
   (`loadJSON` + validator, `saveJSON`, `loadString`/`saveString` untuk kunci
   string mentah, `removeKeys`); tidak ada `localStorage.*` langsung di luar
   helper ini.
+- **`src/modules/shared/downloadUrl.ts`** — unduhan satu klik terpusat: buat
+  `<a download>` sementara lalu klik, dengan kebijakan revoke blob URL yang
+  konsisten (blob di-revoke setelah unduh; `data:` tidak pernah); dipakai
+  hampir semua modul yang punya tombol unduh.
 - **`src/modules/shared/pasFotoBridge.ts` & `autoLayoutBridge.ts`** — meneruskan
   hasil antar modul: ke alur crop Pas Foto 3×4 ("Jadikan Pas Foto 3x4") atau ke
   Auto Layout ("Susun ke A4") dengan awalan label per modul.
+- **`src/modules/shared/createWorkerClient.ts`** — klien Web Worker generik:
+  worker dibuat lazy, pekerjaan dikirim dengan id-sequence, balasan dicocokkan
+  per-id, `terminate` menolak permintaan tertunda lalu menghentikan worker;
+  dipakai upscale-denoise, video-face-enhance, face-enhance, dan enhance-photo.
+- **`src/modules/shared/facePipeline.ts`** — sumber tunggal pipeline per-frame
+  wajah MURNI (tanpa DOM): `processFramePixels` (deteksi wajah → kotak →
+  bentangan histogram → `enhancePixels` → `temporalBlend`), `pickWorkingSize`,
+  `NEUTRAL_PARAMS` — dipakai jalur worker DAN thread utama di video-face-enhance
+  & face-enhance, jadi kedua jalur menghasilkan piksel identik.
+- **`src/modules/shared/audioShared.ts`** — decode AudioBuffer SEKALI lalu
+  berbagi instance yang sama persis antar pemakai (`resolveSharedAudioBuffer`);
+  dipakai waveform/rekaman Video Face Enhance dan musik latar Slideshow to Video.
 - **`src/modules/shared/recordWithAudio.ts`** — rekam stream canvas ke
   WebM/MP4 via MediaRecorder dengan track audio opsional (pola BufferSource →
   MediaStreamAudioDestinationNode, fallback video saja bila muxing tak
-  didukung); dipakai Video Face Enhance, siap dipakai modul lain yang merekam
-  animasi/slideshow.
+  didukung) + **progres byte live**; dipakai Video Face Enhance dan Slideshow
+  to Video, siap dipakai modul lain yang merekam animasi/slideshow.
+- **`src/modules/shared/SyncedPhotoCompare.tsx`** (+ `syncedCompare.css`) —
+  panel banding sebelum/sesudah dengan zoom/pan tersinkron di kedua sisi;
+  dipakai Enhance Photo & Face Enhance.
 
 Alur data pratinjau → PDF/cetak (diagram Mermaid):
 
@@ -194,7 +213,8 @@ const ModulBaruPage = lazy(() => import("./ai-assistant/modul-baru"));
 - **Terusan antar modul**: `pasFotoBridge` ("Jadikan Pas Foto 3x4") dan
   `autoLayoutBridge` ("Susun ke A4", dengan awalan label per modul).
 - **Proses berat**: untuk pipeline gambar yang memblokir UI, tiru pola Web
-  Worker + OffscreenCanvas di `upscale-denoise` (antrean per-id, fallback
+  Worker + OffscreenCanvas di `upscale-denoise` / `face-enhance` — klien
+  generik `createWorkerClient` (id-sequence, terminate saat unmount, fallback
   thread utama).
 
 ## Menjalankan
