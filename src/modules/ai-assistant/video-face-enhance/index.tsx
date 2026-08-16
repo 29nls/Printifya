@@ -188,6 +188,12 @@ export default function VideoFaceEnhancePage() {
   // (menjaga drawImage agar tidak men-taint canvas).
   const [wavePlaying, setWavePlaying] = useState(false);
   const waveSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  // Ref SVG waveform + bar rects (cache) untuk sorot bucket yang sedang
+  // berbunyi saat cek cepat — ditulis langsung dari loop rAF (tanpa re-render).
+  const waveSvgRef = useRef<SVGSVGElement>(null);
+  const waveBarsRef = useRef<SVGRectElement[]>([]);
+  const wavePlayheadRaf = useRef<number>(0);
+  const waveStartCtxTime = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileTokenRef = useRef(0);
@@ -301,9 +307,19 @@ export default function VideoFaceEnhancePage() {
       }
     });
 
+  /** Bersihkan sorot bucket yang sedang berbunyi dari semua bar. */
+  const clearWaveActive = () => {
+    for (const b of waveBarsRef.current) {
+      b.classList.remove("wave-bar-active");
+    }
+  };
+
   /** Hentikan pemutaran cek cepat audio sumber (klik waveform) bila sedang
    *  berjalan — dipakai toggle, ganti video, dan cleanup unmount. */
   const stopWaveAudio = () => {
+    cancelAnimationFrame(wavePlayheadRaf.current);
+    wavePlayheadRaf.current = 0;
+    clearWaveActive();
     if (waveSourceRef.current) {
       try {
         waveSourceRef.current.stop();
@@ -337,6 +353,9 @@ export default function VideoFaceEnhancePage() {
     src.connect(ctx.destination);
     src.onended = () => {
       waveSourceRef.current = null;
+      cancelAnimationFrame(wavePlayheadRaf.current);
+      wavePlayheadRaf.current = 0;
+      clearWaveActive();
       setWavePlaying(false);
     };
     waveSourceRef.current = src;
@@ -347,6 +366,31 @@ export default function VideoFaceEnhancePage() {
       setWavePlaying(false);
       return;
     }
+    // Loop playhead: sorot bucket yang sedang berbunyi mengikuti posisi
+    // BufferSource (ctx.currentTime - waktu mulai) — umpan balik waktu tanpa
+    // re-render React (menulis class langsung ke rect SVG).
+    const startCtxTime = ctx.currentTime;
+    waveStartCtxTime.current = startCtxTime;
+    const playheadTick = () => {
+      if (!waveSourceRef.current) {
+        clearWaveActive();
+        return;
+      }
+      const pos = Math.max(0, ctx.currentTime - startCtxTime);
+      const dur = buf.duration || 0;
+      const bars = waveBarsRef.current;
+      if (bars.length > 0 && dur > 0) {
+        const idx = Math.min(
+          bars.length - 1,
+          Math.floor((pos / dur) * bars.length)
+        );
+        for (let i = 0; i < bars.length; i++) {
+          bars[i].classList.toggle("wave-bar-active", i === idx);
+        }
+      }
+      wavePlayheadRaf.current = requestAnimationFrame(playheadTick);
+    };
+    wavePlayheadRaf.current = requestAnimationFrame(playheadTick);
     setWavePlaying(true);
   };
 
@@ -381,6 +425,17 @@ export default function VideoFaceEnhancePage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videoUrl, hasAudio]);
+
+  // Cache rect bar SVG saat waveform berubah → loop playhead tidak perlu
+  // querySelectorAll tiap frame (160 node × 60 fps tetap murah, tapi cache
+  // membuat loop lebih ringan).
+  useEffect(() => {
+    if (waveSvgRef.current) {
+      waveBarsRef.current = Array.from(
+        waveSvgRef.current.querySelectorAll<SVGRectElement>(".wave-bar")
+      );
+    }
+  }, [waveform]);
 
   const mp4Supported =
     typeof MediaRecorder !== "undefined" &&
@@ -1011,6 +1066,7 @@ export default function VideoFaceEnhancePage() {
                         data-tip={formatWaveTip(waveStats)}
                       >
                       <svg
+                        ref={waveSvgRef}
                         className={wavePlaying ? "waveform playing" : "waveform"}
                         width={160}
                         height={24}

@@ -130,6 +130,16 @@
   fill: var(--accent);
 }
 
+/* Bucket yang sedang berbunyi saat cek cepat: aksen + glow — ditulis langsung
+   dari loop rAF (kelas wave-bar-active), mengikuti posisi BufferSource. */
+.waveform.playing .wave-bar-active {
+  fill: var(--accent);
+  filter: drop-shadow(0 0 2.5px var(--accent));
+}
+
+.wave-bar-active {
+  fill: #1f2937;
+}
 
 .wave-note {
   font-size: 12px;
