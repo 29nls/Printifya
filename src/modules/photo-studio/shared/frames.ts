@@ -16,6 +16,21 @@
  * (hashtagText/bannerText) — dipakai Auto Layout untuk kustomisasi per event.
  */
 
+/** Rect object-fit:cover — perbesar & potong agar sumber mengisi penuh tujuan
+ *  (terpusat; tidak ada pita kosong). SUMBER TUNGGAL untuk `applyFrame` jalur
+ *  thread utama DAN worker framing (OffscreenCanvas) — hasil piksel identik. */
+export function coverFitRect(
+  srcW: number,
+  srcH: number,
+  dstW: number,
+  dstH: number
+): { dx: number; dy: number; dw: number; dh: number } {
+  const s = Math.max(dstW / srcW, dstH / srcH);
+  const dw = srcW * s;
+  const dh = srcH * s;
+  return { dx: (dstW - dw) / 2, dy: (dstH - dh) / 2, dw, dh };
+}
+
 /** Opsi gambar bingkai — teks kustom untuk bingkai bertulisan Booth. */
 export interface FrameDrawOptions {
   /** Teks strip hashtag (booth-hashtag, booth-hashtag-warna); default "#SENYUM". */
@@ -558,20 +573,15 @@ export function applyFrame(
         reject(new Error("Canvas 2D tidak tersedia"));
         return;
       }
-      // object-fit: cover — perbesar & potong agar foto mengisi penuh.
-      const s = Math.max(
-        canvas.width / img.naturalWidth,
-        canvas.height / img.naturalHeight
+      // object-fit: cover — perbesar & potong agar foto mengisi penuh (sumber
+      // tunggal `coverFitRect`, sama dengan jalur worker).
+      const { dx, dy, dw, dh } = coverFitRect(
+        img.naturalWidth,
+        img.naturalHeight,
+        canvas.width,
+        canvas.height
       );
-      const dw = img.naturalWidth * s;
-      const dh = img.naturalHeight * s;
-      ctx.drawImage(
-        img,
-        (canvas.width - dw) / 2,
-        (canvas.height - dh) / 2,
-        dw,
-        dh
-      );
+      ctx.drawImage(img, dx, dy, dw, dh);
       try {
         frame.draw(ctx, canvas.width, canvas.height, opts);
       } catch {

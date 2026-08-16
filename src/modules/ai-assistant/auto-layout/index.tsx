@@ -1,9 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { PasFotoSize } from "../../photo-studio/shared/pasFotoSize";
 import A4SheetPreview from "../../photo-studio/shared/A4SheetPreview";
 import FramePicker from "../../photo-studio/shared/FramePicker";
-import { applyFrame, getFrame } from "../../photo-studio/shared/frames";
+import { getFrame } from "../../photo-studio/shared/frames";
+import {
+  createFrameWorkerPool,
+  frameAll,
+  terminateFrameWorkerPool,
+} from "./frameWorker";
 import {
   chooseOrientation,
   exportLayoutPdf,
@@ -263,7 +268,9 @@ export default function AutoLayoutPage() {
     boothBanner,
   ]);
 
-  // Terapkan bingkai ke semua foto (blob URL → data URL ber-bingkai).
+  // Terapkan bingkai ke semua foto (blob URL → data URL ber-bingkai) — batch
+  // framing lewat `frameAll` (jalur worker + fallback thread utama), sumber
+  // tunggal yang sama dengan ekspor/cetak.
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
@@ -272,18 +279,16 @@ export default function AutoLayoutPage() {
         framedMetaRef.current = null;
         return;
       }
-      const result: Record<string, string> = {};
-      for (const p of photos) {
-        if (cancelled) return;
-        try {
-        result[p.url] = await applyFrame(p.url, frame, size.widthPx, size.heightPx, {
-          hashtagText: p.boothText?.trim() ? p.boothText : debouncedHashtag,
-          bannerText: p.boothText?.trim() ? p.boothText : debouncedBanner,
-        });
-        } catch {
-          // gagal di-frame — biarkan foto asli
-        }
-      }
+      const result = await frameAll(
+        frameClients,
+        photos,
+        frame,
+        size.widthPx,
+        size.heightPx,
+        { hashtagText: debouncedHashtag, bannerText: debouncedBanner },
+        () => cancelled,
+        useFrameWorker
+      );
       if (!cancelled) {
         setFramedMap(result);
         framedMetaRef.current = {
@@ -307,6 +312,23 @@ export default function AutoLayoutPage() {
     debouncedBanner,
     debouncedTextsSig,
   ]);
+  // Framing batch (foto + bingkai + encode PNG) dijalankan di Web Worker
+  // (pool kecil, satu Blob sumber per permintaan — decode/draw/encode di
+  // worker) agar UI tidak membeku pada batch besar — fallback thread utama
+  // bila tanpa Worker/createImageBitmap.
+  const useFrameWorker =
+    typeof Worker !== "undefined" && typeof createImageBitmap === "function";
+  const frameClients = useMemo(
+    () => (useFrameWorker ? createFrameWorkerPool() : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+  // Hentikan semua worker pool saat modul dilepas: tolak permintaan tertunda,
+  // terminate (bitmap yang dipegang worker ikut dibebaskan).
+  useEffect(() => {
+    return () => terminateFrameWorkerPool(frameClients);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [exporting, setExporting] = useState(false);
   const [printing, setPrinting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -500,23 +522,16 @@ export default function AutoLayoutPage() {
       meta.texts === textsSig &&
       photos.every((p) => framedMap[p.url]);
     if (fresh) return framedMap;
-    const result: Record<string, string> = {};
-    for (const p of photos) {
-      try {
-        result[p.url] = await applyFrame(
-          p.url,
-          frame,
-          size.widthPx,
-          size.heightPx,
-          {
-            hashtagText: p.boothText?.trim() ? p.boothText : boothHashtag,
-            bannerText: p.boothText?.trim() ? p.boothText : boothBanner,
-          }
-        );
-      } catch {
-        // gagal di-frame — biarkan foto asli
-      }
-    }
+    const result = await frameAll(
+      frameClients,
+      photos,
+      frame,
+      size.widthPx,
+      size.heightPx,
+      { hashtagText: boothHashtag, bannerText: boothBanner },
+      () => false,
+      useFrameWorker
+    );
     setFramedMap(result);
     framedMetaRef.current = {
       frameId: frame.id,

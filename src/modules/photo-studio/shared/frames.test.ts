@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FRAMES, getFrame, validFrameId } from "./frames";
+import { coverFitRect, FRAMES, getFrame, validFrameId } from "./frames";
 
 /**
  * Konteks 2D rekaman: setiap panggilan metode (termasuk penugasan fillStyle)
@@ -463,6 +463,61 @@ describe("Booth — font mengecil otomatis saat teks melebihi lebar band", () =>
     });
     // fs dasar = max(3, 236*0.085) = 20.06; teks panjang harus mengecil
     expect(finalPx).toBeLessThan(20.06);
+  });
+});
+
+describe("coverFitRect — object-fit:cover (sumber tunggal applyFrame & worker)", () => {
+  it("foto lebih lebar dari kanvas: mengisi tinggi, memotong lebar (dx negatif)", () => {
+    // sumber 4:3 (4000×3000) ke kanvas 3:4 (354×472): cover = skala tinggi
+    const r = coverFitRect(4000, 3000, 354, 472);
+    expect(r.dh).toBe(472);
+    expect(r.dy).toBe(0);
+    expect(r.dw).toBeCloseTo((4000 * 472) / 3000); // = 629.33
+    expect(r.dx).toBeCloseTo((354 - r.dw) / 2, 5); // negatif (terpotong)
+    // cover: tidak ada pita kosong di kedua arah
+    expect(r.dw).toBeGreaterThanOrEqual(354);
+    expect(r.dh).toBeGreaterThanOrEqual(472);
+  });
+
+  it("foto lebih tinggi dari kanvas: mengisi lebar, memotong tinggi (dy negatif)", () => {
+    // sumber 3:4 (3000×4000) ke kanvas 4:3 (472×354): cover = skala lebar
+    const r = coverFitRect(3000, 4000, 472, 354);
+    expect(r.dw).toBe(472);
+    expect(r.dx).toBe(0);
+    expect(r.dh).toBeCloseTo((4000 * 472) / 3000); // = 629.33
+    expect(r.dy).toBeCloseTo((354 - r.dh) / 2, 5); // negatif
+    expect(r.dw).toBeGreaterThanOrEqual(472);
+    expect(r.dh).toBeGreaterThanOrEqual(354);
+  });
+
+  it("rasio sama → tidak ada pemotongan (dx = dy = 0)", () => {
+    // 3000×4000 dan 354×472 sama-sama 3:4
+    const r = coverFitRect(3000, 4000, 354, 472);
+    expect(r.dx).toBe(0);
+    expect(r.dy).toBe(0);
+    expect(r.dw).toBe(354);
+    expect(r.dh).toBe(472);
+  });
+
+  it("terpusat: offset simetris pada sumbu yang terpotong", () => {
+    // sumber lebih lebar → tinggi terisi penuh, lebar terpotong simetris
+    const r = coverFitRect(4000, 3000, 354, 472);
+    expect(r.dh).toBe(472);
+    expect(r.dy).toBe(0);
+    expect(r.dw).toBeGreaterThan(354);
+    expect(r.dx).toBeCloseTo(-(r.dw - 354) / 2, 5);
+  });
+
+  it("identik dengan matematika manual applyFrame (paritas piksel)", () => {
+    const srcW = 3000;
+    const srcH = 2000;
+    const dstW = 236;
+    const dstH = 354;
+    const s = Math.max(dstW / srcW, dstH / srcH);
+    const dw = srcW * s;
+    const dh = srcH * s;
+    const manual = { dx: (dstW - dw) / 2, dy: (dstH - dh) / 2, dw, dh };
+    expect(coverFitRect(srcW, srcH, dstW, dstH)).toEqual(manual);
   });
 });
 
