@@ -31,6 +31,7 @@ import type {
   FaceWorkerResponse,
 } from "./faceWorkerApi";
 import { createWorkerClient } from "../../shared/createWorkerClient";
+import { decodeAudioBuffer } from "../../shared/audioShared";
 import {
   clearVideoOptions,
   loadVideoPrefs,
@@ -115,31 +116,6 @@ function makeAudioContext(): AudioContext | null {
 /** Batas memori wajar untuk AudioBuffer (float32 × kanal × sampel) — video
  *  ultra-panjang direkam tanpa audio daripada memakai ratusan MB RAM. */
 const MAX_AUDIO_BYTES = 100 * 1024 * 1024;
-
-/**
- * Decode audio menjadi AudioBuffer via OfflineAudioContext — bukan context
- * playback: tidak perlu resume/gestur, tanpa warning autoplay, dan bisa
- * dipanggil segera setelah video dipilih (untuk indikator waveform). Hasil
- * AudioBuffer bersifat independen dari context dan bisa diputar ulang oleh
- * context playback mana pun. `null` bila tak didukung / decode gagal.
- */
-function decodeAudioBuffer(arrayBuf: ArrayBuffer): Promise<AudioBuffer | null> {
-  const Ctor =
-    window.OfflineAudioContext ??
-    (window as unknown as {
-      webkitOfflineAudioContext?: typeof OfflineAudioContext;
-    }).webkitOfflineAudioContext;
-  if (!Ctor) return Promise.resolve(null);
-  try {
-    const ctx = new Ctor(1, 1, 44100);
-    return ctx
-      .decodeAudioData(arrayBuf.slice(0))
-      .then((b) => b as AudioBuffer)
-      .catch(() => null);
-  } catch {
-    return Promise.resolve(null);
-  }
-}
 
 export default function VideoFaceEnhancePage() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);

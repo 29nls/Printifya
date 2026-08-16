@@ -1,5 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { coverFit, frameAt, totalDuration } from "./slideshow";
+import {
+  createSharedAudioState,
+  resolveSharedAudioBuffer,
+} from "../../shared/audioShared";
+import { recordWithAudio } from "../../shared/recordWithAudio";
+
+// Batas integrasi: rekaman dimock (DOM MediaRecorder tidak ada di Node) —
+// test memverifikasi KONTRAK modul: musik latar di-decode SEKALI dan pratinjau
+// (BufferSource) maupun rekaman (recordWithAudio) memakai instance yang sama.
+vi.mock("../../shared/recordWithAudio", () => ({
+  recordWithAudio: vi.fn(),
+}));
 
 describe("coverFit — tata letak gambar menutupi kanvas penuh", () => {
   it("rasio sama → mengisi penuh tanpa offset", () => {
@@ -81,5 +93,68 @@ describe("frameAt — timing fade antar slide", () => {
 
   it("tanpa slide → index 0 tanpa next", () => {
     expect(frameAt(0, 0, S, F)).toEqual({ index: 0, next: null, fade: 0 });
+  });
+});
+
+describe("integrasi musik Slideshow — pratinjau & rekaman berbagi buffer yang sama", () => {
+  /** AudioBuffer palsu ringan (musik latar). */
+  const makeFakeBuffer = (): AudioBuffer => {
+    const data = new Float32Array(22050).fill(0.4);
+    return {
+      duration: 0.5,
+      length: data.length,
+      numberOfChannels: 1,
+      sampleRate: 44100,
+      getChannelData: () => data,
+    } as unknown as AudioBuffer;
+  };
+
+  it("decode sekali; BufferSource pratinjau & recordWithAudio memakai instance yang sama", async () => {
+    const state = createSharedAudioState();
+    const fake = makeFakeBuffer();
+    const decode = vi.fn(async () => fake);
+
+    // Konsumen 1 — pratinjau: resolve → BufferSource (musik latar loop).
+    const previewBuffer = (await resolveSharedAudioBuffer(state, decode))!;
+    const previewSrc = { buffer: null as AudioBuffer | null, loop: false };
+    previewSrc.buffer = previewBuffer;
+    previewSrc.loop = true;
+
+    // Konsumen 2 — rekaman: resolve lagi → recordWithAudio (audio loop).
+    const recordBuffer = (await resolveSharedAudioBuffer(state, decode))!;
+    recordWithAudio({
+      canvas: {} as HTMLCanvasElement,
+      fps: 15,
+      mimeType: "video/webm",
+      audio: { context: {} as AudioContext, buffer: recordBuffer, loop: true },
+    });
+
+    // Decode SEKALI (bukan dua kali)…
+    expect(decode).toHaveBeenCalledTimes(1);
+    // …dan instance yang sama persis dipakai kedua konsumen.
+    expect(recordBuffer).toBe(previewBuffer);
+    expect(previewSrc.buffer).toBe(previewBuffer);
+    const call = vi.mocked(recordWithAudio).mock.calls[0][0];
+    expect(call.audio?.buffer).toBe(previewBuffer);
+  });
+
+  it("musik diganti → objek state diganti: decode baru tidak menerima buffer lama", async () => {
+    const fakeA = makeFakeBuffer();
+    const fakeB = makeFakeBuffer();
+    const stateA = createSharedAudioState();
+    const decodeA = vi.fn(async () => fakeA);
+    const bufA = (await resolveSharedAudioBuffer(stateA, decodeA))!;
+
+    // Pengguna memilih musik lain → `musicAudioRef.current` DIGANTI (pola
+    // handleMusic) → state lama tidak terpengaruh decode baru.
+    const stateB = createSharedAudioState();
+    const decodeB = vi.fn(async () => fakeB);
+    const bufB = (await resolveSharedAudioBuffer(stateB, decodeB))!;
+
+    expect(bufA).toBe(fakeA);
+    expect(bufB).toBe(fakeB);
+    expect(bufB).not.toBe(bufA);
+    expect(decodeA).toHaveBeenCalledTimes(1);
+    expect(decodeB).toHaveBeenCalledTimes(1);
   });
 });

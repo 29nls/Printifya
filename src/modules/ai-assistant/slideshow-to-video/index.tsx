@@ -6,6 +6,12 @@ import {
 } from "../../shared/recordWithAudio";
 import ResetPreferencesButton from "../../shared/ResetPreferencesButton";
 import {
+  createSharedAudioState,
+  decodeAudioBuffer,
+  resolveSharedAudioBuffer,
+  type SharedAudioState,
+} from "../../shared/audioShared";
+import {
   coverFit,
   frameAt,
   totalDuration,
@@ -67,10 +73,12 @@ export default function SlideshowToVideoPage() {
   const [music, setMusic] = useState<{
     name: string;
     buffer: ArrayBuffer | null;
-    decoded: AudioBuffer | null;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
+  // Musik latar ikut diputar saat pratinjau (toggle) — instance buffer yang
+  // sama dengan yang dipakai rekaman (decode sekali, lihat audioShared.ts).
+  const [musicOnPreview, setMusicOnPreview] = useState(true);
   const [recording, setRecording] = useState(false);
   const [progress, setProgress] = useState(0);
   const [recBytes, setRecBytes] = useState(0);
@@ -81,6 +89,11 @@ export default function SlideshowToVideoPage() {
   const photoInputRef = useRef<HTMLInputElement>(null);
   const musicInputRef = useRef<HTMLInputElement>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  // State bersama AudioBuffer musik (buffer + promise) — decode SEKALI,
+  // pratinjau & rekaman memakai instance yang sama (pola resolveSharedAudioBuffer).
+  const musicAudioRef = useRef<SharedAudioState>(createSharedAudioState());
+  // BufferSource musik saat pratinjau (dihentikan saat jeda/ganti musik).
+  const musicSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const rafRef = useRef<number>(0);
   const cancelledRef = useRef(false);
   const playStartRef = useRef(0);
@@ -118,15 +131,68 @@ export default function SlideshowToVideoPage() {
     [photos, prefs.slideDur, prefs.fadeDur]
   );
 
-  const stopPreview = useCallback(() => {
+  /** Decode musik latar SEKALI (via OfflineAudioContext, tanpa gestur) — hasil
+   *  di-cache di `musicAudioRef`; pratinjau & rekaman menerima instance yang
+   *  sama persis (pola resolveSharedAudioBuffer). */
+  const ensureMusicBuffer = async (): Promise<AudioBuffer | null> => {
+    const m = music;
+    if (!m || !m.buffer) return null;
+    const raw = m.buffer;
+    return resolveSharedAudioBuffer(musicAudioRef.current, async () => {
+      try {
+        return await decodeAudioBuffer(raw.slice(0));
+      } catch {
+        return null;
+      }
+    });
+  };
+
+  /** Mulai musik latar untuk PRATINJAU (BufferSource loop → destination). */
+  const startPreviewMusic = async () => {
+    if (!music || !musicOnPreview) return;
+    const buf = await ensureMusicBuffer();
+    if (!buf) return;
+    let ctx = audioCtxRef.current;
+    if (!ctx) {
+      ctx = makeAudioContext();
+      audioCtxRef.current = ctx;
+    }
+    if (!ctx) return;
+    await ctx.resume();
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    src.connect(ctx.destination);
+    src.start();
+    musicSourceRef.current = src;
+  };
+
+  const stopPreviewMusic = () => {
+    if (musicSourceRef.current) {
+      try {
+        musicSourceRef.current.stop();
+      } catch {
+        // sudah berhenti — abaikan
+      }
+      musicSourceRef.current = null;
+    }
+  };
+
+  const stopPreview = () => {
     cancelAnimationFrame(rafRef.current);
     rafRef.current = 0;
+    stopPreviewMusic();
     setPlaying(false);
-  }, []);
+  };
 
-  const startPreview = useCallback(() => {
+  const startPreview = async () => {
     if (photos.length === 0) return;
     stopPreview();
+    // Musik latar (bila aktif): decode sekali lalu mulai loop — instance
+    // buffer yang sama dengan yang dipakai rekaman nanti.
+    if (music && musicOnPreview) {
+      await startPreviewMusic();
+    }
     playStartRef.current = performance.now();
     setPlaying(true);
     const loop = () => {
@@ -140,7 +206,17 @@ export default function SlideshowToVideoPage() {
       rafRef.current = requestAnimationFrame(loop);
     };
     rafRef.current = requestAnimationFrame(loop);
-  }, [photos, prefs.slideDur, drawFrame, stopPreview]);
+  };
+
+  /** Toggle musik saat pratinjau (tanpa menghentikan pratinjau berjalan). */
+  const togglePreviewMusic = () => {
+    const next = !musicOnPreview;
+    setMusicOnPreview(next);
+    if (playing) {
+      if (next) void startPreviewMusic();
+      else stopPreviewMusic();
+    }
+  };
 
   // Pembersihan saat unmount: hentikan rAF, batal rekaman, revoke URL hasil,
   // tutup AudioContext (tidak ada pemutaran yang bocor antar halaman).
@@ -152,6 +228,7 @@ export default function SlideshowToVideoPage() {
     return () => {
       cancelAnimationFrame(rafRef.current);
       cancelledRef.current = true;
+      stopPreviewMusic();
       if (resultUrlRef.current) URL.revokeObjectURL(resultUrlRef.current);
       void audioCtxRef.current?.close().catch(() => {});
       audioCtxRef.current = null;
@@ -203,7 +280,11 @@ export default function SlideshowToVideoPage() {
     }
     try {
       const buf = await f.arrayBuffer();
-      setMusic({ name: f.name, buffer: buf, decoded: null });
+      stopPreviewMusic();
+      // Musik baru → objek state DIGANTI: decode yang masih berjalan menulis
+      // ke objek lama, tidak bocor ke musik berikutnya.
+      musicAudioRef.current = createSharedAudioState();
+      setMusic({ name: f.name, buffer: buf });
       setError(null);
     } catch {
       setError("Gagal membaca file musik.");
@@ -266,6 +347,7 @@ export default function SlideshowToVideoPage() {
     }
 
     // Musik latar (opsional): AudioBuffer → loop → MediaStreamDestination.
+    // Buffer = instance yang sama dengan yang dipakai pratinjau (decode sekali).
     let audio: RecordWithAudioAudio | null = null;
     if (music) {
       try {
@@ -276,17 +358,13 @@ export default function SlideshowToVideoPage() {
         }
         if (ctx) {
           await ctx.resume();
-          let buffer = music.decoded;
-          if (!buffer && music.buffer) {
-            buffer = await ctx.decodeAudioData(music.buffer.slice(0));
-            setMusic((m) => (m ? { ...m, decoded: buffer } : m));
-          }
+          const buffer = await ensureMusicBuffer();
           if (buffer) {
             audio = { context: ctx, buffer, loop: true };
           }
         }
       } catch {
-        // decode gagal — rekam tanpa musik
+        // gagal — rekam tanpa musik
       }
     }
 
@@ -400,7 +478,15 @@ export default function SlideshowToVideoPage() {
             }}
           />
           {music && (
-            <button type="button" className="btn" onClick={() => setMusic(null)}>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                stopPreviewMusic();
+                musicAudioRef.current = createSharedAudioState();
+                setMusic(null);
+              }}
+            >
               Hapus Musik
             </button>
           )}
@@ -420,7 +506,7 @@ export default function SlideshowToVideoPage() {
         {music && (
           <div className="slideshow-music">
             🎵 <strong>{music.name}</strong> — diputar berulang sebagai latar
-            saat rekaman
+            (pratinjau & rekaman), decode sekali
           </div>
         )}
 
@@ -511,9 +597,22 @@ export default function SlideshowToVideoPage() {
                 type="button"
                 className="btn"
                 disabled={recording}
-                onClick={playing ? stopPreview : startPreview}
+                onClick={playing ? stopPreview : () => void startPreview()}
               >
                 {playing ? "⏸ Jeda" : "▶️ Putar Pratinjau"}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={recording || !music}
+                title={
+                  music
+                    ? "Putar musik latar saat pratinjau (buffer sama dengan rekaman)"
+                    : "Pilih musik latar dulu"
+                }
+                onClick={togglePreviewMusic}
+              >
+                {musicOnPreview ? "🔊 Musik" : "🔇 Musik Mati"}
               </button>
               <button
                 type="button"

@@ -305,9 +305,12 @@ dan restorasi wajah video gaya PGTFormer.
   real-time: canvas kerja (720p/1080p sesuai pilihan) digambar tiap rAF sambil di-capture
   via `canvas.captureStream(fps)` + `MediaRecorder` (WebM) memakai helper bersama
   `src/modules/shared/recordWithAudio.ts` dengan opsi `loop` untuk musik latar
-  (`AudioBuffer` di-decode dalam gestur klik, diputar berulang via BufferSource →
-  MediaStreamAudioDestinationNode — output tidak senyap; tanpa musik, hasil direkam
-  senyap). Progress rekaman (persen + waktu nyata) tampil dengan tombol Hentikan yang
+  (diputar berulang via BufferSource → MediaStreamAudioDestinationNode — output tidak
+  senyap; tanpa musik, hasil direkam senyap). Musik latar di-decode SEKALI via helper
+  bersama `src/modules/shared/audioShared.ts` (`decodeAudioBuffer` OfflineAudioContext +
+  `resolveSharedAudioBuffer`): pratinjau (toggle 🔊 Musik, BufferSource loop →
+  destination) dan rekaman memakai instance AudioBuffer yang sama persis — tanpa decode
+  ganda; mengganti musik mereset state (decode lama tidak bocor). Progress rekaman (persen + waktu nyata) tampil dengan tombol Hentikan yang
   membuang hasil parsial; pratinjau play/pause + timecode memakai logika frame yang sama.
 - **Persistensi**: delapan modul menyimpan preferensi di localStorage dengan tombol
   `ResetPreferencesButton` (konfirmasi dua-klik): Auto Crop Face (zoom `--facePercent`),
