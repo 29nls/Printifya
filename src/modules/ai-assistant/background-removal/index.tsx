@@ -87,6 +87,11 @@ export default function BackgroundRemovalPage() {
   // dari file lama yang selesai belakangan diabaikan agar tidak menimpa hasil
   // file terbaru (pola autoSeq di auto-crop-face / fileTokenRef di VFE).
   const fileSeqRef = useRef(0);
+  // Token urutan OPERASI (reproses opsi segmen pada file yang SAMA): naik tiap
+  // processImage — hanya proses TERBARU yang boleh menerapkan hasil & menutup
+  // busy state; proses lama yang selesai belakangan dibuang (P1 tidak mematikan
+  // busy saat P2 masih encode → tidak ada flicker panel).
+  const opSeqRef = useRef(0);
   // Worker memiliki ImageBitmap hasil + mask (createImageBitmap + transfer
   // zero-copy) — komposit & encode PNG berjalan di luar thread utama.
   // `workerReadyRef` = hasil aktif sudah ada di worker (untuk selectBg /
@@ -238,6 +243,12 @@ export default function BackgroundRemovalPage() {
     // Token saat pemanggilan: hasil dibuang bila file yang lebih baru dipilih
     // sebelum proses selesai (hasil file lama tidak menimpa file baru).
     const token = fileSeqRef.current;
+    // Token OPERASI: naik tiap pemanggilan — hanya proses terbaru yang boleh
+    // menerapkan hasil/menutup busy (toggle opsi segmen cepat → P1 basi dibuang).
+    const opToken = ++opSeqRef.current;
+    // Hasil hanya dipakai bila TIDAK ada file lebih baru ATAU operasi lebih baru.
+    const isCurrent = () =>
+      token === fileSeqRef.current && opToken === opSeqRef.current;
     // Jalur worker berjalan async — busy-nya ditutup di `.finally` async,
     // jadi `finally` sinkron di bawah HANYA untuk jalur fallback.
     let workerPath = false;
@@ -245,9 +256,9 @@ export default function BackgroundRemovalPage() {
     // Beri kesempatan indikator "Memproses…" ter-render dulu.
     setTimeout(async () => {
       try {
-        if (token !== fileSeqRef.current) return;
+        if (!isCurrent()) return;
         const { canvas, mask, foregroundRatio } = removeBackground(image, opts);
-        if (token !== fileSeqRef.current) return;
+        if (!isCurrent()) return;
         setDims({ w: canvas.width, h: canvas.height });
         const bgOpt = BG_OPTIONS.find((o) => o.id === bgId);
         setWarning(
@@ -267,8 +278,9 @@ export default function BackgroundRemovalPage() {
           try {
             const resultBmp = await createImageBitmap(canvas);
             const maskBmp = await createImageBitmap(mask);
-            if (token !== fileSeqRef.current) {
-              // File lain dipilih saat bitmap dibuat — buang hasil basi.
+            if (!isCurrent()) {
+              // File lain dipilih / operasi lebih baru saat bitmap dibuat —
+              // buang hasil basi.
               resultBmp.close();
               maskBmp.close();
               return;
@@ -288,19 +300,21 @@ export default function BackgroundRemovalPage() {
                 [resultBmp, maskBmp]
               )
               .then(async (res) => {
-                if (token !== fileSeqRef.current) return;
+                if (!isCurrent()) return;
                 if (!res.ok) throw new Error(res.error);
                 workerReadyRef.current = true;
                 await applyResultBlob(res.blob, bgOpt?.hex ?? null);
               })
               .catch((e) => {
-                if (token !== fileSeqRef.current) return;
+                if (!isCurrent()) return;
                 setError(
                   e instanceof Error ? e.message : "Gagal memproses gambar."
                 );
               })
               .finally(() => {
-                if (token === fileSeqRef.current) setProcessing(false);
+                // Hanya operasi TERBARU yang menutup busy — proses basi tidak
+                // mematikan busy milik proses yang masih berjalan.
+                if (isCurrent()) setProcessing(false);
                 onDone?.();
               });
             return;
@@ -322,14 +336,14 @@ export default function BackgroundRemovalPage() {
         );
         setStep("result");
       } catch (e) {
-        if (token !== fileSeqRef.current) return;
+        if (!isCurrent()) return;
         setError(e instanceof Error ? e.message : "Gagal memproses gambar.");
       } finally {
         // Jalur worker sudah return — busy ditutup di `.finally` async-nya.
         if (workerPath) return;
-        // Busy state hanya dipulihkan oleh proses TERBARU (proses basi tidak
-        // boleh menimpa flag milik file yang sedang berjalan).
-        if (token === fileSeqRef.current) setProcessing(false);
+        // Busy state hanya dipulihkan oleh operasi TERBARU (proses basi tidak
+        // boleh menimpa flag milik proses yang masih berjalan).
+        if (isCurrent()) setProcessing(false);
         onDone?.();
       }
     }, 60);
