@@ -13,7 +13,7 @@ import type {
 import { createWorkerClient } from "../../shared/createWorkerClient";
 import { setPendingLayoutPhoto } from "../../shared/autoLayoutBridge";
 import SyncedPhotoCompare from "../../shared/SyncedPhotoCompare";
-import { downloadUrl } from "../../shared/downloadUrl";
+import { blobToDataUrl, downloadUrl } from "../../shared/downloadUrl";
 import {
   clearEnhanceOptions,
   loadLayoutPrefix,
@@ -232,20 +232,6 @@ export default function EnhancePhotoPage() {
     const blob = await processFullRes();
     downloadUrl(URL.createObjectURL(blob), "enhanced-photo.png");
   });
-
-  /** Blob hasil → data URL (Auto Layout memakai data URL: modul tujuan bahkan
-   *  me-revoke object URL masuknya saat double-mount StrictMode, jadi blob URL
-   *  tidak aman untuk bridge). Base64 via FileReader berjalan di luar thread
-   *  utama (baca blob async) — jauh lebih ringan daripada `canvas.toDataURL`
-   *  sinkron pada resolusi penuh. */
-  const blobToDataUrl = (blob: Blob): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const fr = new FileReader();
-      fr.onload = () => resolve(fr.result as string);
-      fr.onerror = () =>
-        reject(new Error("Gagal mengonversi hasil ke data URL."));
-      fr.readAsDataURL(blob);
-    });
 
   /** Kirim hasil enhance (resolusi penuh) ke Auto Layout untuk lembar A4. */
   const forwardToLayout = withBusy("layout", async () => {

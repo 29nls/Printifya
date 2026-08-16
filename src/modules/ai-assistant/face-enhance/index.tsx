@@ -24,7 +24,7 @@ import {
 } from "./optionsStorage";
 import { comparePipelines, type CompareResult } from "./qualityCompare";
 import { pickWorkingSize } from "../../shared/facePipeline";
-import { downloadUrl } from "../../shared/downloadUrl";
+import { blobToDataUrl, downloadUrl } from "../../shared/downloadUrl";
 import type { VideoEnhanceParams } from "../video-face-enhance/videoEnhance";
 import { loadVideoPrefs } from "../video-face-enhance/optionsStorage";
 import ResetPreferencesButton from "../../shared/ResetPreferencesButton";
@@ -294,20 +294,6 @@ export default function FaceEnhancePage() {
     const blob = await processFullRes();
     downloadUrl(URL.createObjectURL(blob), "face-enhanced.png");
   });
-
-  /** Blob hasil → data URL (modul tujuan memakai data URL: pas foto bahkan
-   *  me-revoke object URL masuknya saat double-mount StrictMode, jadi blob
-   *  URL tidak aman untuk bridge). Base64 via FileReader berjalan di luar
-   *  thread utama (baca blob async) — jauh lebih ringan daripada
-   *  `canvas.toDataURL` sinkron pada resolusi penuh. */
-  const blobToDataUrl = (blob: Blob): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const fr = new FileReader();
-      fr.onload = () => resolve(fr.result as string);
-      fr.onerror = () =>
-        reject(new Error("Gagal mengonversi hasil ke data URL."));
-      fr.readAsDataURL(blob);
-    });
 
   /** Teruskan hasil (sudah diperbesar) ke alur crop pas foto ukuran terpilih. */
   const forwardToPasFoto = (target: PasFotoTargetId) =>

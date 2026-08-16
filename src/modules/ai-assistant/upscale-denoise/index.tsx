@@ -14,7 +14,7 @@ import type {
   Waifu2xWorkerResponse,
 } from "./waifu2xWorkerApi";
 import { createWorkerClient } from "../../shared/createWorkerClient";
-import { downloadUrl } from "../../shared/downloadUrl";
+import { blobToDataUrl, downloadUrl } from "../../shared/downloadUrl";
 import { setPendingPasFoto } from "../../shared/pasFotoBridge";
 import {
   setPendingLayoutPhoto,
@@ -564,19 +564,12 @@ export default function UpscaleDenoisePage() {
   };
 
   /** Konversi blob URL hasil → data URL (mandiri). Blob URL di-revoke saat
-   *  modul unmount, sedangkan data URL aman diteruskan ke modul lain. */
+   *  modul unmount, sedangkan data URL aman diteruskan ke modul lain. Fetch +
+   *  konversi base64 via `blobToDataUrl` bersama (downloadUrl.ts). */
   const toDataUrl = (url: string): Promise<string> =>
     fetch(url)
       .then((r) => r.blob())
-      .then(
-        (blob) =>
-          new Promise<string>((resolve, reject) => {
-            const fr = new FileReader();
-            fr.onload = () => resolve(fr.result as string);
-            fr.onerror = () => reject(fr.error ?? new Error("Gagal membaca hasil."));
-            fr.readAsDataURL(blob);
-          })
-      );
+      .then((blob) => blobToDataUrl(blob));
 
   /** Teruskan satu hasil ke alur crop Pas Foto 3x4. */
   const forwardToPasFoto = async (it: Item) => {

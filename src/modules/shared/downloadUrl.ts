@@ -51,3 +51,21 @@ export function downloadUrl(
     }
   }
 }
+
+/**
+ * Konversi Blob → data URL (mandiri, tahan revoke object URL). Dipakai
+ * terusan antar modul: bridge memakai data URL karena modul tujuan bahkan
+ * me-revoke object URL masuknya saat double-mount StrictMode, jadi blob URL
+ * tidak aman untuk diteruskan. Base64 via FileReader berjalan di luar thread
+ * utama (baca blob async) — jauh lebih ringan daripada `canvas.toDataURL`
+ * sinkron pada resolusi penuh.
+ */
+export function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result as string);
+    fr.onerror = () =>
+      reject(fr.error ?? new Error("Gagal mengonversi hasil ke data URL."));
+    fr.readAsDataURL(blob);
+  });
+}
