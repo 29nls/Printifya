@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { type FaceEnhanceParams } from "../face-enhance/faceEnhance";
+import { type FaceEnhanceParams } from "../../shared/facePipeline";
 import { setPendingPasFoto } from "../../shared/pasFotoBridge";
 import { setPendingLayoutPhoto } from "../../shared/autoLayoutBridge";
 import {

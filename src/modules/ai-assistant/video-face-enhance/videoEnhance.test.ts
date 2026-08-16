@@ -17,7 +17,7 @@ import {
   samplingFactor,
   temporalBlend,
 } from "./videoEnhance";
-import { NEUTRAL_PARAMS } from "../face-enhance/faceEnhance";
+import { NEUTRAL_PARAMS } from "../../shared/facePipeline";
 import { recordWithAudio } from "../../shared/recordWithAudio";
 
 // Batas integrasi: rekaman dimock (DOM MediaRecorder tidak ada di Node) —

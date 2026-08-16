@@ -17,7 +17,7 @@
  * sama dengan `enhanceFace`).
  */
 
-import { processFramePixels } from "../video-face-enhance/videoEnhance";
+import { processFramePixels } from "../../shared/facePipeline";
 import type { FaceEnhanceParams } from "./faceEnhance";
 
 export interface CompareMetrics {

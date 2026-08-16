@@ -23,7 +23,8 @@ import {
   saveUpscale,
 } from "./optionsStorage";
 import { comparePipelines, type CompareResult } from "./qualityCompare";
-import { pickWorkingSize, type VideoEnhanceParams } from "../video-face-enhance/videoEnhance";
+import { pickWorkingSize } from "../../shared/facePipeline";
+import type { VideoEnhanceParams } from "../video-face-enhance/videoEnhance";
 import { loadVideoPrefs } from "../video-face-enhance/optionsStorage";
 import ResetPreferencesButton from "../../shared/ResetPreferencesButton";
 import "../../photo-studio/shared/style.css";

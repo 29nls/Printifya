@@ -4,15 +4,15 @@ import {
   comparePipelines,
   runFramePipeline,
 } from "./qualityCompare";
-import { processFramePixels } from "../video-face-enhance/videoEnhance";
+import { processFramePixels } from "../../shared/facePipeline";
 import { NEUTRAL_PARAMS, type FaceEnhanceParams } from "./faceEnhance";
 
 // Spy pada processFramePixels (delegasi ke implementasi asli agar semua test
 // lain tetap berperilaku identik) — membuktikan runFramePipeline mendelegasi
 // penuh ke sumber tunggal jalur video, bukan menyalin pipeline.
-vi.mock("../video-face-enhance/videoEnhance", async (importOriginal) => {
+vi.mock("../../shared/facePipeline", async (importOriginal) => {
   const mod = await importOriginal<
-    typeof import("../video-face-enhance/videoEnhance")
+    typeof import("../../shared/facePipeline")
   >();
   return {
     ...mod,

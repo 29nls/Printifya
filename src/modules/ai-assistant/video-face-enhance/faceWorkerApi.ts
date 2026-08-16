@@ -7,7 +7,7 @@
  * dan "reset" (kosongkan frame sebelumnya `prev` — dipanggil tiap awal run agar
  * koherensi temporal tidak bocor antar video/run).
  */
-import type { FaceEnhanceParams } from "../face-enhance/faceEnhance";
+import type { FaceEnhanceParams } from "../../shared/facePipeline";
 
 /** Permintaan proses satu frame. `pixels` = RGBA w×h (ArrayBuffer, dikirim
  *  via transfer — buffer sisi pengirim ter-detach). `temporal` = kekuatan
