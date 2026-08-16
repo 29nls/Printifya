@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useExclusiveOp } from "../../shared/useExclusiveOp";
 import { useNavigate } from "react-router-dom";
 import { detectFace, type FaceRegion } from "../../photo-studio/shared/faceDetect";
 import { setPendingPasFoto } from "../../shared/pasFotoBridge";
@@ -92,12 +93,11 @@ export default function FaceEnhancePage() {
     resMode: VideoEnhanceParams["resMode"];
     videoParams: VideoEnhanceParams;
   } | null>(null);
-  /** Operasi full-res yang sedang berjalan (busy state — UI tetap responsif
-   *  karena pipeline berjalan di Web Worker). */
-  const [busyOp, setBusyOp] = useState<
-    "download" | "pasfoto" | "layout" | null
-  >(null);
-  const busyRef = useRef(false);
+  // Operasi full-res eksklusif: satu dalam satu waktu, busy state + error
+  // handling dari helper bersama (pola yang sama dengan Enhance Photo).
+  const { op: busyOp, run: withBusy } = useExclusiveOp<
+    "download" | "pasfoto" | "layout"
+  >(setError, "Gagal memproses foto.");
   // Token urutan file: naik setiap handleFile — hasil async (decode/deteksi
   // wajah) dari file lama yang selesai belakangan diabaikan agar tidak
   // menimpa file terbaru (pola autoSeq di auto-crop-face / fileTokenRef di VFE).
@@ -268,26 +268,6 @@ export default function FaceEnhancePage() {
     if (!res.ok) throw new Error(res.error);
     return res.blob;
   };
-
-  /** Bungkus operasi full-res dengan busy state + guard anti-konkurensi. */
-  const withBusy =
-    (op: "download" | "pasfoto" | "layout", fn: () => Promise<void>) =>
-    async () => {
-      if (busyRef.current) return;
-      busyRef.current = true;
-      setBusyOp(op);
-      setError("");
-      try {
-        await fn();
-      } catch (e) {
-        setError(
-          e instanceof Error ? e.message : "Gagal memproses foto."
-        );
-      } finally {
-        busyRef.current = false;
-        setBusyOp(null);
-      }
-    };
 
   const download = withBusy("download", async () => {
     // Urutan CodeFormer → Real-ESRGAN: restore dulu, lalu perbesar hasilnya.

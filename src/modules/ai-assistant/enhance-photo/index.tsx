@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useExclusiveOp } from "../../shared/useExclusiveOp";
 import { useNavigate } from "react-router-dom";
 import {
   computeAutoParams,
@@ -51,10 +52,12 @@ export default function EnhancePhotoPage() {
    *  Default dari localStorage, disimpan ulang setiap berubah (pola
    *  optionsStorage.ts di Auto Crop Face). */
   const [layoutPrefix, setLayoutPrefix] = useState(loadLayoutPrefix);
-  /** Operasi full-res yang sedang berjalan (busy state — UI tetap responsif
-   *  karena pipeline berjalan di Web Worker). */
-  const [busyOp, setBusyOp] = useState<"download" | "layout" | null>(null);
-  const busyRef = useRef(false);
+  // Operasi full-res eksklusif: satu dalam satu waktu, busy state + error
+  // handling dari helper bersama (pola yang sama dengan Face Enhance).
+  const { op: busyOp, run: withBusy } = useExclusiveOp<"download" | "layout">(
+    setError,
+    "Gagal memproses foto."
+  );
   // Token urutan file: naik setiap handleFile — hasil async (decode) dari file
   // lama yang selesai belakangan diabaikan agar tidak menimpa file terbaru
   // (pola autoSeq di auto-crop-face / fileTokenRef di VFE).
@@ -209,24 +212,6 @@ export default function EnhancePhotoPage() {
     if (!res.ok) throw new Error(res.error);
     return res.blob;
   };
-
-  /** Bungkus operasi full-res dengan busy state + guard anti-konkurensi. */
-  const withBusy =
-    (op: "download" | "layout", fn: () => Promise<void>) =>
-    async () => {
-      if (busyRef.current) return;
-      busyRef.current = true;
-      setBusyOp(op);
-      setError("");
-      try {
-        await fn();
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Gagal memproses foto.");
-      } finally {
-        busyRef.current = false;
-        setBusyOp(null);
-      }
-    };
 
   const download = withBusy("download", async () => {
     const blob = await processFullRes();
