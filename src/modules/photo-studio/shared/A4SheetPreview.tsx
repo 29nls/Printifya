@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { memo, useCallback, useRef, useState } from "react";
 import {
   computeSheetLayout,
   orientedDims,
@@ -39,6 +39,85 @@ interface A4SheetPreviewProps {
 const SCALE_MM = 2; // px per mm dasar (A4 → 420×594 px)
 const MAX_DISPLAY = 560; // px — sisi terpanjang lembar pada pratinjau "sesuaikan layar"
 const FULL_SCALE_MM = 96 / 25.4; // px per mm — ukuran cetak sungguhan (≈96 dpi)
+
+/**
+ * Satu sel grid lembar — di-MEMO agar ketikan (nama/teks Booth) atau perubahan
+ * state lain di modul pemakai tidak me-render ulang puluhan <img> lembar yang
+ * tidak berubah (diukur: ~1 dtk per ketikan pada batch 30 foto → milidetik).
+ * Prop dipilih agar shallow-compare efektif: src/label string (nilai stabil),
+ * angka/boolean primitif, dan handler stabil via useCallback di pemakai.
+ */
+interface SheetCellProps {
+  index: number;
+  src?: string;
+  label?: string;
+  labelPx: number;
+  draggable: boolean;
+  dragging: boolean;
+  dropOver: boolean;
+  interactive: boolean;
+  onDragStart: (i: number) => void;
+  onDragOver: (i: number, e: React.DragEvent) => void;
+  onDragLeave: (i: number) => void;
+  onDrop: (i: number, e: React.DragEvent) => void;
+  onDragEnd: () => void;
+}
+
+const SheetCell = memo(function SheetCell({
+  index,
+  src,
+  label,
+  labelPx,
+  draggable,
+  dragging,
+  dropOver,
+  interactive,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  onDragEnd,
+}: SheetCellProps) {
+  return (
+    <div
+      className={`sheet-cell${draggable ? " sheet-cell-draggable" : ""}${
+        dropOver ? " sheet-cell-drop" : ""
+      }`}
+      draggable={draggable}
+      data-dragging={interactive ? dragging : undefined}
+      onDragStart={
+        draggable
+          ? (e) => {
+              onDragStart(index);
+              e.dataTransfer.effectAllowed = "move";
+            }
+          : undefined
+      }
+      onDragOver={
+        draggable ? (e) => onDragOver(index, e) : undefined
+      }
+      onDragLeave={draggable ? () => onDragLeave(index) : undefined}
+      onDrop={draggable ? (e) => onDrop(index, e) : undefined}
+      onDragEnd={draggable ? onDragEnd : undefined}
+    >
+      {src ? (
+        <img
+          src={src}
+          alt=""
+          className="sheet-photo"
+          draggable={interactive ? false : undefined}
+        />
+      ) : (
+        <div className="sheet-photo sheet-photo-empty" />
+      )}
+      {label && (
+        <span className="sheet-label" style={{ fontSize: labelPx }}>
+          {label}
+        </span>
+      )}
+    </div>
+  );
+});
 
 /**
  * Pratinjau template cetak (default A4; bisa A3/A5/R2–R30): pas foto disusun
@@ -93,21 +172,65 @@ export default function A4SheetPreview({
   const cellH = size.heightMm * px;
   // Resolusi target drop dari POSISI pointer (sumber tunggal sheetLayout),
   // dengan indeks sel event sebagai fallback — geometri drag ikut hitungan
-  // yang sama dengan PDF/cetak.
-  const dropTargetFromEvent = (e: React.DragEvent): number => {
-    const el = sheetRef.current;
-    if (!el) return -1;
-    const rect = el.getBoundingClientRect();
-    return sheetCellAtPoint(
-      e.clientX - rect.left - padX,
-      e.clientY - rect.top - padY,
-      cols,
-      rows,
-      cellW,
-      cellH,
-      layoutPx
-    );
-  };
+  // yang sama dengan PDF/cetak. useCallback agar identitas handler stabil
+  // antar render (SheetCell di-memo; handler baru tiap render membatalkan
+  // memo pada semua sel).
+  const dropTargetFromEvent = useCallback(
+    (e: React.DragEvent): number => {
+      const el = sheetRef.current;
+      if (!el) return -1;
+      const rect = el.getBoundingClientRect();
+      return sheetCellAtPoint(
+        e.clientX - rect.left - padX,
+        e.clientY - rect.top - padY,
+        cols,
+        rows,
+        cellW,
+        cellH,
+        layoutPx
+      );
+    },
+    [padX, padY, cols, rows, cellW, cellH, layoutPx]
+  );
+  const handleDragStart = useCallback((i: number) => {
+    setDragFrom(i);
+    setDragOverIdx(null);
+  }, []);
+  const handleDragOver = useCallback(
+    (i: number, e: React.DragEvent) => {
+      if (dragFrom === null || dragFrom === i) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      setDragOverIdx(i);
+    },
+    [dragFrom]
+  );
+  const handleDragLeave = useCallback((i: number) => {
+    setDragOverIdx((cur) => (cur === i ? null : cur));
+  }, []);
+  // `onDropPhoto` dibaca dari ref agar handleDrop tetap stabil walau pemakai
+  // mengoper callback inline (identity baru tiap render) — tanpanya memo sel
+  // batal di setiap render induk.
+  const onDropPhotoRef = useRef(onDropPhoto);
+  onDropPhotoRef.current = onDropPhoto;
+  const handleDrop = useCallback(
+    (i: number, e: React.DragEvent) => {
+      e.preventDefault();
+      setDragOverIdx(null);
+      if (dragFrom === null) return;
+      // Grid rapat (gap 0): posisi & indeks sel selalu sama;
+      // hitungan posisi jadi sumber, indeks event fallback.
+      const target = dropTargetFromEvent(e);
+      const dest = target >= 0 ? target : i;
+      if (dest !== dragFrom) onDropPhotoRef.current?.(dragFrom, dest);
+      setDragFrom(null);
+    },
+    [dragFrom, dropTargetFromEvent]
+  );
+  const handleDragEnd = useCallback(() => {
+    setDragFrom(null);
+    setDragOverIdx(null);
+  }, []);
 
   const photos = srcs ?? (src ? Array.from({ length: count }, () => src) : []);
   const isMulti = srcs !== undefined;
@@ -130,77 +253,22 @@ export default function A4SheetPreview({
         }}
       >
         {Array.from({ length: count }).map((_, i) => (
-          <div
+          <SheetCell
             key={i}
-            className={`sheet-cell${interactive ? " sheet-cell-draggable" : ""}${
-              dragOverIdx === i ? " sheet-cell-drop" : ""
-            }`}
+            index={i}
+            src={photos[i]}
+            label={labels?.[i]}
+            labelPx={labelPx}
             draggable={interactive && !!photos[i]}
-            data-dragging={interactive ? dragFrom === i : undefined}
-            onDragStart={
-              interactive
-                ? (e) => {
-                    setDragFrom(i);
-                    setDragOverIdx(null);
-                    e.dataTransfer.effectAllowed = "move";
-                  }
-                : undefined
-            }
-            onDragOver={
-              interactive
-                ? (e) => {
-                    if (dragFrom === null || dragFrom === i) return;
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = "move";
-                    setDragOverIdx(i);
-                  }
-                : undefined
-            }
-            onDragLeave={
-              interactive
-                ? () => setDragOverIdx((cur) => (cur === i ? null : cur))
-                : undefined
-            }
-            onDrop={
-              interactive
-                ? (e) => {
-                    e.preventDefault();
-                    setDragOverIdx(null);
-                    if (dragFrom === null) return;
-                    // Grid rapat (gap 0): posisi & indeks sel selalu sama;
-                    // hitungan posisi jadi sumber, indeks event fallback.
-                    const target = dropTargetFromEvent(e);
-                    const dest = target >= 0 ? target : i;
-                    if (dest !== dragFrom) onDropPhoto(dragFrom, dest);
-                    setDragFrom(null);
-                  }
-                : undefined
-            }
-            onDragEnd={
-              interactive
-                ? () => {
-                    setDragFrom(null);
-                    setDragOverIdx(null);
-                  }
-                : undefined
-            }
-          >
-            {photos[i] ? (
-              <img
-                src={photos[i]}
-                alt=""
-                className="sheet-photo"
-                draggable={interactive ? false : undefined}
-              />
-            ) : (
-              <div className="sheet-photo sheet-photo-empty" />
-            )}
-            {labels?.[i] && (
-              <span className="sheet-label" style={{ fontSize: labelPx }}>
-                {labels[i]}
-              </span>
-            )}
-          </div>
+            dragging={dragFrom === i}
+            dropOver={dragOverIdx === i}
+            interactive={interactive}
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            onDragEnd={handleDragEnd}
+          />
         ))}
       </div>
     </div>
