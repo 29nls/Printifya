@@ -114,6 +114,46 @@ export function processFramePixels(
 }
 
 /**
+ * Pengukur kecepatan pemrosesan nyata (frame/detik) dengan jendela geser:
+ * `mark()` dipanggil tiap kali SATU frame selesai diproses; fps dihitung dari
+ * jumlah frame dalam `windowMs` terakhir (default 2 dtk) — tahan terhadap
+ * lonjakan sesaat dan tidak sensitif terhadap jeda antar proses.
+ */
+export interface FpsMeter {
+  /** Catat satu frame selesai (waktu default `performance.now()`);
+   *  kembalikan fps jendela geser (0 bila data belum cukup). */
+  mark(now?: number): number;
+  reset(): void;
+}
+
+export function createFpsMeter(windowMs = 2000): FpsMeter {
+  let times: number[] = [];
+  return {
+    mark(now = performance.now()) {
+      times.push(now);
+      const cutoff = now - windowMs;
+      while (times.length > 0 && times[0] < cutoff) times.shift();
+      const span = times.length > 1 ? now - times[0] : 0;
+      return span > 0 ? (times.length - 1) / (span / 1000) : 0;
+    },
+    reset() {
+      times = [];
+    },
+  };
+}
+
+/** Format perkiraan sisa waktu untuk bilah progres — "5.4 dtk" / "2 m 05 dtk";
+ *  string kosong untuk nilai invalid/negatif. Murni, bisa diuji. */
+export function formatEta(sec: number): string {
+  if (!Number.isFinite(sec) || sec < 0) return "";
+  if (sec < 10) return `${sec.toFixed(1)} dtk`;
+  if (sec < 60) return `${Math.round(sec)} dtk`;
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return s > 0 ? `${m} m ${String(s).padStart(2, "0")} dtk` : `${m} m`;
+}
+
+/**
  * Wadah state bersama untuk AudioBuffer sumber yang di-decode sekali per
  * video: instance buffer + promise yang sama dibagikan SEMUA konsumen
  * (indikator waveform dan perekaman) — tanpa decode ganda atau race.

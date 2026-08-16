@@ -3,7 +3,9 @@ import {
   computePeaks,
   computeWaveStats,
   countFrames,
+  createFpsMeter,
   createSharedAudioState,
+  formatEta,
   formatTimecode,
   DEFAULT_VIDEO_PARAMS,
   pickWorkingSize,
@@ -403,6 +405,66 @@ describe("formatTimecode — timecode HH:MM:SS.d untuk banding A/B", () => {
     expect(formatTimecode(-1)).toBe("0:00:00.0");
     expect(formatTimecode(NaN)).toBe("0:00:00.0");
     expect(formatTimecode(Infinity)).toBe("0:00:00.0");
+  });
+});
+
+describe("formatEta — perkiraan sisa waktu di bilah progres", () => {
+  it("di bawah 10 dtk → satu desimal", () => {
+    expect(formatEta(5.43)).toBe("5.4 dtk");
+  });
+
+  it("10–59 dtk → dibulatkan ke detik", () => {
+    expect(formatEta(12)).toBe("12 dtk");
+    expect(formatEta(59.6)).toBe("60 dtk");
+  });
+
+  it("menit → m + ss dtk", () => {
+    expect(formatEta(125)).toBe("2 m 05 dtk");
+    expect(formatEta(120)).toBe("2 m");
+    expect(formatEta(3600)).toBe("60 m");
+  });
+
+  it("invalid/negatif → string kosong", () => {
+    expect(formatEta(NaN)).toBe("");
+    expect(formatEta(-1)).toBe("");
+    expect(formatEta(Infinity)).toBe("");
+  });
+});
+
+describe("createFpsMeter — kecepatan frame/detik jendela geser", () => {
+  it("2 frame dalam 1 dtk → 1 fps; 3 mark seragam → sesuai interval", () => {
+    const m = createFpsMeter();
+    expect(m.mark(0)).toBe(0); // 1 mark saja → belum cukup data
+    expect(m.mark(1000)).toBe(1); // (2-1) / 1 dtk
+    expect(m.mark(2000)).toBe(1); // (3-1) / 2 dtk
+  });
+
+  it("fps naik bila frame datang lebih rapat", () => {
+    const m = createFpsMeter();
+    m.mark(0);
+    m.mark(250);
+    m.mark(500);
+    // 4 mark dalam 0.75 dtk → (4-1) / 0.75 = 4 fps.
+    expect(m.mark(750)).toBeCloseTo(4, 5);
+  });
+
+  it("mark lama keluar dari jendela geser", () => {
+    const m = createFpsMeter(2000);
+    m.mark(0);
+    m.mark(1000);
+    // 3 dtk kemudian: mark 0 sudah kedaluwarsa (cutoff = 3000-2000 = 1000).
+    m.mark(2000);
+    const fps = m.mark(3000);
+    // jendela [1000..3000] = 3 mark → (3-1)/2 dtk = 1 fps (mark 0 terbuang).
+    expect(fps).toBeCloseTo(1, 5);
+  });
+
+  it("reset mengosongkan riwayat", () => {
+    const m = createFpsMeter();
+    m.mark(0);
+    m.mark(1000);
+    m.reset();
+    expect(m.mark(2000)).toBe(0);
   });
 });
 

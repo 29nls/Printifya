@@ -333,8 +333,10 @@ dan restorasi wajah video gaya PGTFormer.
   jumlah frame (durasi × FPS output). Orkestrasi di `index.tsx`: video di-seek per frame
   (`seekTo`), digambar ke canvas, diproses, lalu direkam via `canvas.captureStream` +
   `MediaRecorder` (WebM, atau MP4 bila didukung browser) dengan jeda yang di-pace ke waktu
-  nyata agar durasi hasil ≈ durasi sumber; tombol Batal menghentikan perekaman dan membuang
-  hasil parsial. Track audio sumber dipertahankan: audio di-decode sekali menjadi
+  nyata agar durasi hasil ≈ durasi sumber; bilah progres menampilkan kecepatan pemrosesan
+  nyata (frame/dtk via jendela geser `createFpsMeter` + perkiraan sisa waktu `formatEta`,
+  di-feed hanya saat frame benar-benar diproses — bukan fase tulis putImageData); tombol
+  Batal menghentikan perekaman dan membuang hasil parsial. Track audio sumber dipertahankan: audio di-decode sekali menjadi
   `AudioBuffer` (`decodeAudioData`, hasil di-cache) lalu diputar ulang via WebAudio
   (`BufferSource` → `MediaStreamAudioDestinationNode`) saat rekaman dimulai — elemen video
   tidak pernah diputar (hanya di-seek/di-draw), sehingga drawImage tidak men-taint canvas

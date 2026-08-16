@@ -7,7 +7,9 @@ import {
   computePeaks,
   computeWaveStats,
   countFrames,
+  createFpsMeter,
   createSharedAudioState,
+  formatEta,
   formatTimecode,
   DEFAULT_VIDEO_PARAMS,
   FPS_OPTIONS,
@@ -156,6 +158,10 @@ export default function VideoFaceEnhancePage() {
   const [progress, setProgress] = useState<{
     done: number;
     total: number;
+    /** Kecepatan pemrosesan nyata (frame/detik, jendela geser ~2 dtk). */
+    fps: number;
+    /** Perkiraan sisa waktu (dtk) berdasarkan fps saat ini. */
+    etaSec: number;
   } | null>(null);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [resultExt, setResultExt] = useState<"webm" | "mp4">("webm");
@@ -564,7 +570,24 @@ export default function VideoFaceEnhancePage() {
     const canPrerender = processTotal * frameBytes <= 180 * 1024 * 1024;
     cancelledRef.current = false;
     setProcessing(true);
-    setProgress({ done: 0, total: processTotal });
+    // Kecepatan nyata: meter jendela geser di-feed hanya saat frame BENAR-BENAR
+    // diproses (bukan fase tulis putImageData) → fps/ETA tidak menyesatkan.
+    const fpsMeter = createFpsMeter();
+    let lastFps = 0;
+    let lastEta = 0;
+    const updateProgress = (done: number, processed: boolean) => {
+      if (processed) {
+        lastFps = fpsMeter.mark();
+        lastEta = lastFps > 0 ? (processTotal - done) / lastFps : 0;
+      }
+      setProgress({
+        done,
+        total: processTotal,
+        fps: lastFps,
+        etaSec: lastEta,
+      });
+    };
+    updateProgress(0, false);
     // Frame hasil sebelumnya — hanya dipakai fallback thread utama (di worker,
     // prev dipegang worker dan di-reset via pesan "reset").
     let prev: Uint8ClampedArray | null = null;
@@ -639,7 +662,7 @@ export default function VideoFaceEnhancePage() {
           if (cancelledRef.current) break;
           const out = await processOne(j * sf);
           if (out) buffers.push(out);
-          setProgress({ done: j + 1, total: processTotal });
+          updateProgress(j + 1, true);
           if (j % 3 === 2) await new Promise((r) => setTimeout(r, 0));
         }
         // Fase 2: mulai rekam, lalu putImageData buffer pada jadwal fps yang
@@ -664,7 +687,7 @@ export default function VideoFaceEnhancePage() {
               0
             );
             if (i % 5 === 4 || i === total - 1) {
-              setProgress({ done: idx + 1, total: processTotal });
+              updateProgress(idx + 1, false);
             }
           }
         }
@@ -690,7 +713,7 @@ export default function VideoFaceEnhancePage() {
               0
             );
           }
-          setProgress({ done: j + 1, total: processTotal });
+          updateProgress(j + 1, true);
         }
       }
     } catch (e) {
@@ -1248,6 +1271,15 @@ export default function VideoFaceEnhancePage() {
                   <span>
                     Frame {progress.done} / {progress.total} (
                     {Math.round((progress.done / progress.total) * 100)}%)
+                    {progress.fps > 0 && (
+                      <span className="vfe-speed">
+                        {" "}
+                        · {progress.fps >= 10 ? Math.round(progress.fps) : progress.fps.toFixed(1)} fps
+                        {progress.etaSec > 0 && (
+                          <> · sisa ~{formatEta(progress.etaSec)}</>
+                        )}
+                      </span>
+                    )}
                   </span>
                 </div>
               )}
