@@ -137,6 +137,12 @@
   white-space: nowrap;
 }
 
+/* Indikator byte live dari MediaRecorder (progres rekaman). */
+.slideshow-rec-bytes {
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  font-weight: 600;
+}
 
 /* Hasil rekaman (video + unduh). */
 .slideshow-result {

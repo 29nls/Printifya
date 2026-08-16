@@ -49,6 +49,15 @@ export function fmtTime(t: number): string {
   return `${m}:${String(s).padStart(2, "0")}.${d}`;
 }
 
+/** Format byte untuk indikator progres rekaman live (mis. "1.2 MB"). */
+export function fmtBytes(b: number): string {
+  if (!Number.isFinite(b) || b < 0) return "0 B";
+  if (b < 1024) return `${b} B`;
+  const kb = b / 1024;
+  if (kb < 1024) return `${kb.toFixed(0)} KB`;
+  return `${(kb / 1024).toFixed(1)} MB`;
+}
+
 const PREVIEW_W = 960;
 const PREVIEW_H = 540;
 
@@ -64,6 +73,7 @@ export default function SlideshowToVideoPage() {
   const [playing, setPlaying] = useState(false);
   const [recording, setRecording] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [recBytes, setRecBytes] = useState(0);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
 
   const previewRef = useRef<HTMLCanvasElement>(null);
@@ -227,6 +237,7 @@ export default function SlideshowToVideoPage() {
     }
     setRecording(false);
     setProgress(0);
+    setRecBytes(0);
     if (cancelledRef.current || !blob || blob.size === 0) {
       if (!cancelledRef.current) setError("Rekaman gagal — hasil kosong.");
       return;
@@ -285,11 +296,15 @@ export default function SlideshowToVideoPage() {
       mimeType: "video/webm",
       audio,
       videoBitsPerSecond: 12_000_000,
+      // Progres live: byte yang terkumpul dari MediaRecorder (tiap ~250 ms)
+      // → indikator ukuran di samping persen/waktu saat merekam.
+      onProgress: (p) => setRecBytes(p.bytes),
     });
 
     cancelledRef.current = false;
     setRecording(true);
     setProgress(0);
+    setRecBytes(0);
     const total = totalDuration(photos.length, prefs.slideDur);
     const start = performance.now();
     let lastProgressUpdate = 0;
@@ -526,6 +541,7 @@ export default function SlideshowToVideoPage() {
                 <span>
                   {Math.round(progress * 100)}% ({fmtTime(progress * duration)}{" "}
                   / {fmtTime(duration)})
+                  {recBytes > 0 && <span className="slideshow-rec-bytes"> · {fmtBytes(recBytes)}</span>}
                 </span>
               </div>
             )}

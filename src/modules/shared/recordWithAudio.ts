@@ -14,6 +14,10 @@
  *   `drawImage` berikutnya men-taint canvas (perilaku Chromium).
  * - Bila muxing audio+video tak didukung untuk `mimeType` (mis. MP4 di browser
  *   tertentu), `MediaRecorder` melempar → fallback otomatis ke video saja.
+ * - Progres live: `recorder.start(timesliceMs)` membuat `dataavailable` berkala
+ *   (default 250 ms), dan tiap chunk menambah `RecordProgress` (byte + jumlah
+ *   chunk) — pemanggil bisa membaca snapshot kapan saja via `progress()` atau
+ *   mengikuti lewat opsi `onProgress` untuk menampilkan indikator saat merekam.
  * - `stop()` menghentikan BufferSource audio, menghentikan perekaman, menunggu
  *   semua chunk terkumpul, menghentikan seluruh track, dan mengembalikan Blob.
  */
@@ -35,6 +39,21 @@ export interface RecordWithAudioOptions {
   /** AudioBuffer + AudioContext untuk memutar ulang audio sumber (opsional). */
   audio?: RecordWithAudioAudio | null;
   videoBitsPerSecond?: number;
+  /**
+   * Interval `dataavailable` (ms) agar progres live tersedia. Default 250;
+   * nilai <= 0 = chunk hanya saat stop (perilaku lama).
+   */
+  timesliceMs?: number;
+  /** Dipanggil setiap chunk baru terkumpul (kumulatif byte + jumlah chunk). */
+  onProgress?: (p: RecordProgress) => void;
+}
+
+/** Snapshot progres rekaman live (byte/chunk yang terkumpul sejauh ini). */
+export interface RecordProgress {
+  /** Total byte yang sudah diterima dari MediaRecorder. */
+  bytes: number;
+  /** Jumlah chunk `dataavailable` yang sudah diterima. */
+  chunkCount: number;
 }
 
 export interface AudioRecorder {
@@ -43,6 +62,8 @@ export interface AudioRecorder {
   chunks: BlobPart[];
   /** Resolve saat perekaman benar-benar berhenti (semua chunk terkumpul). */
   stopped: Promise<void>;
+  /** Snapshot progres saat ini (byte/chunk) — untuk indikator live. */
+  progress(): RecordProgress;
   /**
    * Hentikan BufferSource audio + perekaman; tunggu `stopped`; hentikan semua
    * track. Mengembalikan Blob hasil (mimeType yang diminta).
@@ -51,7 +72,15 @@ export interface AudioRecorder {
 }
 
 export function recordWithAudio(opts: RecordWithAudioOptions): AudioRecorder {
-  const { canvas, fps, mimeType, audio, videoBitsPerSecond = 8_000_000 } = opts;
+  const {
+    canvas,
+    fps,
+    mimeType,
+    audio,
+    videoBitsPerSecond = 8_000_000,
+    timesliceMs = 250,
+    onProgress,
+  } = opts;
 
   const canvasStream = (
     canvas as HTMLCanvasElement & { captureStream: (fps?: number) => MediaStream }
@@ -93,19 +122,36 @@ export function recordWithAudio(opts: RecordWithAudioOptions): AudioRecorder {
   }
 
   const chunks: BlobPart[] = [];
+  let bytes = 0;
+  let chunkCount = 0;
+  const notifyProgress = () => {
+    if (onProgress) {
+      try {
+        onProgress({ bytes, chunkCount });
+      } catch {
+        // callback pemakai melempar — jangan merusak perekaman
+      }
+    }
+  };
   recorder.ondataavailable = (e) => {
-    if (e.data && e.data.size > 0) chunks.push(e.data);
+    if (e.data && e.data.size > 0) {
+      chunks.push(e.data);
+      bytes += e.data.size;
+      chunkCount += 1;
+      notifyProgress();
+    }
   };
   const stopped = new Promise<void>((resolve) => {
     recorder.onstop = () => resolve();
   });
-  recorder.start();
+  recorder.start(timesliceMs > 0 ? timesliceMs : undefined);
 
   return {
     stream,
     recorder,
     chunks,
     stopped,
+    progress: () => ({ bytes, chunkCount }),
     stop: async () => {
       try {
         srcNode?.stop();

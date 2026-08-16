@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { recordWithAudio } from "./recordWithAudio";
+import { recordWithAudio, type AudioRecorder } from "./recordWithAudio";
 
 // --- Fake DOM media (vitest berjalan di Node tanpa DOM) ---
 
@@ -189,5 +189,71 @@ describe("recordWithAudio — rekam canvas dengan audio opsional", () => {
     const rec = recordWithAudio({ canvas: fakeCanvas(), fps: 15, mimeType: "video/webm" });
     await rec.stop();
     await expect(rec.stop()).resolves.toBeInstanceOf(Blob);
+  });
+
+  it("timeslice default 250 ms → dataavailable berkala (progres live)", () => {
+    const rec = recordWithAudio({ canvas: fakeCanvas(), fps: 15, mimeType: "video/webm" });
+    expect(asFake(rec).start).toHaveBeenCalledWith(250);
+  });
+
+  it("timesliceMs 0 → start tanpa argumen (chunk hanya saat stop, perilaku lama)", () => {
+    const rec = recordWithAudio({
+      canvas: fakeCanvas(),
+      fps: 15,
+      mimeType: "video/webm",
+      timesliceMs: 0,
+    });
+    expect(asFake(rec).start).toHaveBeenCalledWith(undefined);
+  });
+
+  it("progress() mencerminkan byte/chunk kumulatif sejauh ini", () => {
+    const rec = recordWithAudio({ canvas: fakeCanvas(), fps: 15, mimeType: "video/webm" });
+    expect(rec.progress()).toEqual({ bytes: 0, chunkCount: 0 });
+    const emitChunk = (data: string) =>
+      asFake(rec).ondataavailable?.({
+        data: new Blob([data]),
+      } as unknown as BlobEvent);
+    emitChunk("abcdef");
+    emitChunk("ghij");
+    expect(rec.progress().chunkCount).toBe(2);
+    expect(rec.progress().bytes).toBe("abcdefghij".length);
+  });
+
+  it("onProgress dipanggil per chunk dengan snapshot kumulatif", () => {
+    const seen: Array<{ bytes: number; chunkCount: number }> = [];
+    const rec = recordWithAudio({
+      canvas: fakeCanvas(),
+      fps: 15,
+      mimeType: "video/webm",
+      onProgress: (p) => seen.push({ ...p }),
+    });
+    const rec2 = recordWithAudio({ canvas: fakeCanvas(), fps: 15, mimeType: "video/webm" });
+    const emitChunk = (r: AudioRecorder, data: string) =>
+      asFake(r).ondataavailable?.({
+        data: new Blob([data]),
+      } as unknown as BlobEvent);
+    emitChunk(rec, "aaaa");
+    emitChunk(rec, "bbbbbb");
+    expect(seen).toEqual([
+      { bytes: 4, chunkCount: 1 },
+      { bytes: 10, chunkCount: 2 },
+    ]);
+    // tanpa onProgress → tidak ada yang dipanggil (tidak melempar)
+    expect(rec2.progress()).toEqual({ bytes: 0, chunkCount: 0 });
+  });
+
+  it("onProgress yang melempar tidak merusak perekaman", () => {
+    const rec = recordWithAudio({
+      canvas: fakeCanvas(),
+      fps: 15,
+      mimeType: "video/webm",
+      onProgress: () => {
+        throw new Error("callback rusak");
+      },
+    });
+    asFake(rec).ondataavailable?.({
+      data: new Blob(["xyz"]),
+    } as unknown as BlobEvent);
+    expect(rec.progress()).toEqual({ bytes: 3, chunkCount: 1 });
   });
 });
