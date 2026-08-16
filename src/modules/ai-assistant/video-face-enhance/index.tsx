@@ -600,6 +600,14 @@ export default function VideoFaceEnhancePage() {
 
     const frameBytes = w * h * 4;
     const canPrerender = processTotal * frameBytes <= 180 * 1024 * 1024;
+    // Token file saat run dimulai — bila video diganti di tengah proses
+    // (handleFile menaikkan fileTokenRef), run DIBATALKAN: loop berhenti dan
+    // hasil parsial dibuang tanpa menyentuh state milik file baru. Tanpa ini,
+    // loop tetap menggambar dari elemen video yang sumber datanya sudah ditukar
+    // (output korup diam-diam) lalu menimpa hasil file baru dengan blob lama.
+    const token = fileTokenRef.current;
+    const aborted = () =>
+      cancelledRef.current || token !== fileTokenRef.current;
     cancelledRef.current = false;
     setProcessing(true);
     // Kecepatan nyata: meter jendela geser di-feed hanya saat frame BENAR-BENAR
@@ -639,10 +647,10 @@ export default function VideoFaceEnhancePage() {
      *  Pipeline berat (deteksi wajah + enhancePixels + temporalBlend) berjalan
      *  di Web Worker; thread utama hanya seek/draw/getImageData yang ringan. */
     const processOne = async (i: number): Promise<Uint8ClampedArray | null> => {
-      if (cancelledRef.current) return null;
+      if (aborted()) return null;
       const t = Math.min(meta.duration, i / params.fps);
       await seekTo(video, t);
-      if (cancelledRef.current) return null;
+      if (aborted()) return null;
       ctx.drawImage(video, 0, 0, w, h);
       const img = ctx.getImageData(0, 0, w, h);
       if (useWorker) {
@@ -691,7 +699,7 @@ export default function VideoFaceEnhancePage() {
         // BELUM mulai — tidak ada kanvas kosong yang ikut terekam).
         const buffers: Uint8ClampedArray[] = [];
         for (let j = 0; j < processTotal; j++) {
-          if (cancelledRef.current) break;
+          if (aborted()) break;
           const out = await processOne(j * sf);
           if (out) buffers.push(out);
           updateProgress(j + 1, true);
@@ -704,12 +712,12 @@ export default function VideoFaceEnhancePage() {
         // ini selalu mengikuti waktu nyata. Audio diputar ulang dari buffer via
         // BufferSource → destination agar track audio asli mengalir (video
         // sumber tetap pause).
-        if (!cancelledRef.current && buffers.length === processTotal) {
+        if (!aborted() && buffers.length === processTotal) {
           recorder = startRecorder();
           const t0 = performance.now();
           const interval = 1000 / params.fps;
           for (let i = 0; i < total; i++) {
-            if (cancelledRef.current) break;
+            if (aborted()) break;
             const wait = t0 + i * interval - performance.now();
             if (wait > 1) await sleep(wait);
             const idx = Math.min(processTotal - 1, sampledBufferIndex(i, sampling));
@@ -730,7 +738,7 @@ export default function VideoFaceEnhancePage() {
         const t0 = performance.now();
         const interval = 1000 / params.fps;
         for (let j = 0; j < processTotal; j++) {
-          if (cancelledRef.current) break;
+          if (aborted()) break;
           const out = await processOne(j * sf);
           if (!out) break;
           // Tahan frame hasil selama `sf` slot output (durasi tetap ≈ sumber).
@@ -752,11 +760,14 @@ export default function VideoFaceEnhancePage() {
       // Error tak terduga (mis. canvas tainted oleh data lintas-origin) —
       // jangan biarkan UI macet di "Memproses…"; tampilkan pesan dan
       // kembalikan tombol ke kondisi semula (state di-reset di bawah).
-      setError(
-        e instanceof Error
-          ? e.message
-          : "Gagal memproses video (error tak dikenal)."
-      );
+      // Run basi (video sudah diganti) tidak boleh menimpa UI file baru.
+      if (!aborted()) {
+        setError(
+          e instanceof Error
+            ? e.message
+            : "Gagal memproses video (error tak dikenal)."
+        );
+      }
     } finally {
       // Pulihkan elemen sumber (pause + mute) setelah rekam selesai/dibatalkan.
       try {
@@ -775,8 +786,9 @@ export default function VideoFaceEnhancePage() {
         recorderRef.current = null;
       }
     }
-    if (cancelledRef.current || !recorder) {
-      // dibatalkan / recorder tidak pernah mulai — buang hasil parsial
+    if (aborted() || !recorder) {
+      // dibatalkan (Batal / video diganti) / recorder tidak pernah mulai —
+      // buang hasil parsial, jangan sentuh state milik file baru
       setProcessing(false);
       setProgress(null);
       return;
