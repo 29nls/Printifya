@@ -152,6 +152,11 @@ export default function VideoFaceEnhancePage() {
   >("idle");
   // Puncak waveform audio sumber (0..1 per bucket) — SVG mini di samping badge.
   const [waveform, setWaveform] = useState<Float32Array | null>(null);
+  // Pemutaran audio sumber untuk cek cepat (klik waveform): diputar via
+  // BufferSource → context.destination — elemen video TIDAK pernah diputar
+  // (menjaga drawImage agar tidak men-taint canvas).
+  const [wavePlaying, setWavePlaying] = useState(false);
+  const waveSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileTokenRef = useRef(0);
@@ -206,6 +211,7 @@ export default function VideoFaceEnhancePage() {
   useEffect(() => {
     return () => {
       cancelledRef.current = true;
+      stopWaveAudio();
       try {
         recorderRef.current?.stop();
       } catch {
@@ -263,6 +269,55 @@ export default function VideoFaceEnhancePage() {
       })();
     }
     return audioPromiseRef.current;
+  };
+
+  /** Hentikan pemutaran cek cepat audio sumber (klik waveform) bila sedang
+   *  berjalan — dipakai toggle, ganti video, dan cleanup unmount. */
+  const stopWaveAudio = () => {
+    if (waveSourceRef.current) {
+      try {
+        waveSourceRef.current.stop();
+      } catch {
+        // sudah berhenti — abaikan
+      }
+      waveSourceRef.current = null;
+    }
+    setWavePlaying(false);
+  };
+
+  /**
+   * Putar/jeda audio sumber untuk cek cepat tanpa membuka pemutar penuh:
+   * klik waveform memutar AudioBuffer ter-decode (BufferSource → destination)
+   * dari awal; klik lagi menghentikannya. Elemen video tidak pernah diputar.
+   */
+  const toggleWaveAudio = () => {
+    const buf = audioBufferRef.current;
+    if (!buf) return;
+    if (waveSourceRef.current) {
+      stopWaveAudio();
+      return;
+    }
+    // Context dibuat/resume dalam gestur klik (autoplay dengan suara diizinkan).
+    const ctx =
+      audioCtxRef.current ?? (audioCtxRef.current = makeAudioContext());
+    if (!ctx) return;
+    void ctx.resume();
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    src.onended = () => {
+      waveSourceRef.current = null;
+      setWavePlaying(false);
+    };
+    waveSourceRef.current = src;
+    try {
+      src.start();
+    } catch {
+      waveSourceRef.current = null;
+      setWavePlaying(false);
+      return;
+    }
+    setWavePlaying(true);
   };
 
   // Decode audio segera setelah video dipilih → indikator waveform meyakinkan
@@ -374,6 +429,7 @@ export default function VideoFaceEnhancePage() {
       // Video baru → audio buffer/promise lama TIDAK berlaku (jangan diputar
       // ulang untuk video lain) — indikator waveform ikut di-reset dan akan
       // di-decode ulang oleh efek [videoUrl, hasAudio].
+      stopWaveAudio();
       audioBufferRef.current = null;
       audioPromiseRef.current = null;
       setWaveform(null);
@@ -883,16 +939,30 @@ export default function VideoFaceEnhancePage() {
                       </span>
                     ) : waveform ? (
                       <svg
-                        className="waveform"
+                        className={wavePlaying ? "waveform playing" : "waveform"}
                         width={160}
                         height={24}
                         viewBox="0 0 160 24"
-                        role="img"
-                        aria-label="Bentuk gelombang audio sumber (AudioBuffer ter-decode)"
+                        role="button"
+                        tabIndex={0}
+                        aria-label={
+                          wavePlaying
+                            ? "Jeda audio sumber (klik untuk menghentikan)"
+                            : "Putar audio sumber (klik untuk memutar, cek cepat)"
+                        }
+                        aria-pressed={wavePlaying}
+                        onClick={toggleWaveAudio}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            toggleWaveAudio();
+                          }
+                        }}
                       >
                         <title>
-                          Audio sumber ter-decode — akan diputar ulang saat
-                          rekaman
+                          {wavePlaying
+                            ? "Memutar audio sumber — klik untuk menghentikan"
+                            : "Klik untuk memutar audio sumber (cek cepat)"}
                         </title>
                         {Array.from(waveform, (p, i) => {
                           const h = Math.max(1, Math.round(p * 20));
@@ -929,6 +999,7 @@ export default function VideoFaceEnhancePage() {
                   setProgress(null);
                   setError("");
                   setHasAudio(null);
+                  stopWaveAudio();
                   audioBufferRef.current = null;
                   audioPromiseRef.current = null;
                   setWaveform(null);

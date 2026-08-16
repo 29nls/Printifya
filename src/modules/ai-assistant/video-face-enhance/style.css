@@ -64,11 +64,28 @@
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 1px 2px;
+  cursor: pointer;
+}
+
+.waveform:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Sedang memutar (klik untuk cek cepat): bar menyala, bingkai diberi aksen. */
+.waveform.playing {
+  border-color: var(--accent);
+  box-shadow: 0 0 5px var(--accent);
+}
+
+.waveform.playing .wave-bar {
+  fill: #fff;
 }
 
 .wave-bar {
   fill: var(--accent);
 }
+
 
 .wave-note {
   font-size: 12px;
