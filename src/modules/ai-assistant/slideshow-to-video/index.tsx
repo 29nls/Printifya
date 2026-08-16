@@ -188,6 +188,7 @@ export default function SlideshowToVideoPage() {
 
   const startPreview = async () => {
     if (photos.length === 0) return;
+    setError("");
     stopPreview();
     // Musik latar (bila aktif): decode sekali lalu mulai loop — instance
     // buffer yang sama dengan yang dipakai rekaman nanti.
@@ -197,14 +198,27 @@ export default function SlideshowToVideoPage() {
     playStartRef.current = performance.now();
     setPlaying(true);
     const loop = () => {
-      const total = totalDuration(photos.length, prefs.slideDur);
-      const t = (performance.now() - playStartRef.current) / 1000;
-      const tt = total > 0 ? t % total : 0;
-      drawFrame(previewRef.current, tt);
-      if (timeRef.current) {
-        timeRef.current.textContent = fmtTime(Math.min(t, total));
+      try {
+        const total = totalDuration(photos.length, prefs.slideDur);
+        const t = (performance.now() - playStartRef.current) / 1000;
+        const tt = total > 0 ? t % total : 0;
+        drawFrame(previewRef.current, tt);
+        if (timeRef.current) {
+          timeRef.current.textContent = fmtTime(Math.min(t, total));
+        }
+        rafRef.current = requestAnimationFrame(loop);
+      } catch (e) {
+        // Satu frame gagal (mis. foto korup / drawImage throw) — JANGAN biarkan
+        // loop rAF mati diam-diam: tampilkan pesan, hentikan pratinjau dengan
+        // bersih (rAF dibatalkan, musik dihentikan, state playing di-reset)
+        // sehingga pengguna bisa memperbaiki (ganti foto) dan memutar lagi.
+        setError(
+          e instanceof Error
+            ? `Pratinjau gagal: ${e.message}`
+            : "Pratinjau gagal — kesalahan saat menggambar frame."
+        );
+        stopPreview();
       }
-      rafRef.current = requestAnimationFrame(loop);
     };
     rafRef.current = requestAnimationFrame(loop);
   };
