@@ -191,6 +191,7 @@ dan restorasi wajah video gaya PGTFormer.
 | **Model preset Waifu2x** (Photo-HQ-W4xEX · Photo-Conservative-x4 · Photo-Small-W2xEX · Universal-Fast-W2xEX — profil heuristik skala/denoise/TTA) | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | Format output PNG/WebP/JPG + kualitas | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ (PNG) | ❌ (video) |
 | Perbandingan format PNG/WebP/JPG (ukuran file + PSNR) | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| **Perbandingan kualitas Face vs Video Face Enhance** pada frame yang sama (PSNR ∞-safe + Δ rata-rata/maks + % piksel berubah) | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ (perbandingan tersedia di Face Enhance) |
 | **Unduh Semua** (batch berurutan, aman browser) | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | **Susun lembar cetak** (grid kolom/baris) | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
 | Kertas A3/A4/A5/R2–R30 | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
@@ -250,6 +251,19 @@ dan restorasi wajah video gaya PGTFormer.
   (`computeFaceBox`/`computeStretch`/`enhancePixels`) terpisah dari pembungkus canvas agar
   bisa diuji tanpa DOM; pembungkus `enhanceFace` (termasuk urutan restore→upscale) diuji
   dengan harness canvas mock.
+- **Perbandingan kualitas Face vs Video Face Enhance** (`qualityCompare.ts`): tombol
+  "Bandingkan pada frame ini" menjalankan kedua pipeline pada foto yang sama di resolusi
+  kerja video (`pickWorkingSize` dari `resMode` tersimpan modul video — 512/720/asli,
+  dibatasi 1600 px untuk foto sangat besar) lalu `comparePixels` menghitung **PSNR**
+  (∞ bila identik), Δ rata-rata, Δ maks, dan % piksel berubah (>8 level) antar hasil —
+  ditampilkan sebagai kartu metrik ringkas + gambar berdampingan. Karena kedua modul
+  memakai inti pipeline yang sama per frame (`enhancePixels`), hasil identik (∞ dB) saat
+  parameter sama; perbedaan muncul dari parameter tersimpan tiap modul dan resolusi kerja
+  video (koherensi temporal `temporalBlend` bersifat identitas pada satu frame — hanya
+  aktif antar frame video). `runFramePipeline`/`comparePipelines` diuji dengan harness canvas
+  mock; kedua pipeline mendeteksi wajah pada kanvas kerjanya sendiri (pola `processOne`,
+  frame tergambar sebelum dipulihkan — setara dengan deteksi pada sumber asli karena
+  `detectFace` menormalisasi ke ≤240 px), jadi PSNR mencerminkan perbedaan parameter murni.
 - **Upscale & Denoise berjalan di Web Worker + OffscreenCanvas**: pipeline `processImage`
   (upscale → denoise → TTA average) maupun perbandingan format `compareFormats` (encode
   PNG/WebP/JPG + PSNR) dijalankan di `waifu2x.worker.ts` (antrean pekerjaan per-id:

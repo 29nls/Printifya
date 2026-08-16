@@ -16,11 +16,19 @@ import {
   saveLayoutPrefix,
   saveUpscale,
 } from "./optionsStorage";
+import { comparePipelines, type CompareResult } from "./qualityCompare";
+import { pickWorkingSize, type VideoEnhanceParams } from "../video-face-enhance/videoEnhance";
+import { loadVideoPrefs } from "../video-face-enhance/optionsStorage";
 import ResetPreferencesButton from "../../shared/ResetPreferencesButton";
 import "../../photo-studio/shared/style.css";
 import "./style.css";
 
 const PREVIEW_MAX = 1200; // px — sisi terpanjang pratinjau live
+
+/** Batas sisi terpanjang perbandingan kualitas saat resolusi kerja video "asli"
+ *  (video besar diproses di resolusi kerja lebih kecil; di sini dibatasi agar
+ *  tombol perbandingan tetap responsif pada foto sangat besar). */
+const COMPARE_MAX = 1600;
 
 const UPSCALE_OPTIONS = [1, 2, 4] as const;
 
@@ -69,8 +77,18 @@ export default function FaceEnhancePage() {
   const [upscale, setUpscale] = useState<number>(() => loadUpscale());
   /** Ukuran pas foto tujuan terusan (default 3×4). */
   const [pasTarget, setPasTarget] = useState<PasFotoTargetId>("3x4");
+  /** Hasil perbandingan kualitas Face Enhance vs Video Face Enhance. */
+  const [comparing, setComparing] = useState(false);
+  const [compare, setCompare] = useState<{
+    result: CompareResult;
+    resMode: VideoEnhanceParams["resMode"];
+    videoParams: VideoEnhanceParams;
+  } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+
+  // Metrik perbandingan (local const agar narrowing TS berlaku di JSX).
+  const compareMetrics = compare?.result.metrics ?? null;
 
   useEffect(() => {
     saveLayoutPrefix(layoutPrefix);
@@ -181,6 +199,55 @@ export default function FaceEnhancePage() {
     setPendingLayoutPhoto(full.toDataURL("image/png"), `${layoutPrefix}${base}`);
     navigate("/ai-assistant/auto-layout");
   };
+
+  /**
+   * Bandingkan kualitas Face Enhance vs Video Face Enhance pada frame foto
+   * yang sama: kedua pipeline dijalankan di resolusi kerja video (`resMode`
+   * tersimpan modul video), lalu PSNR + diff dihitung antar hasil. Dijalankan
+   * di luar paint (setTimeout) agar tombol sempat menampilkan "Membandingkan…".
+   */
+  const runCompare = () => {
+    if (!img) return;
+    setError("");
+    setComparing(true);
+    setCompare(null);
+    window.setTimeout(() => {
+      try {
+        const videoPrefs = loadVideoPrefs();
+        const resMode = videoPrefs.params.resMode;
+        let { w, h } = pickWorkingSize(
+          img.naturalWidth,
+          img.naturalHeight,
+          resMode
+        );
+        const longSide = Math.max(w, h);
+        if (longSide > COMPARE_MAX) {
+          const s = COMPARE_MAX / longSide;
+          w = Math.max(2, Math.round((w * s) / 2) * 2);
+          h = Math.max(2, Math.round((h * s) / 2) * 2);
+        }
+        const result = comparePipelines(img, params, videoPrefs.params, w, h);
+        setCompare({ result, resMode, videoParams: videoPrefs.params });
+      } catch (e) {
+        setError(
+          e instanceof Error ? e.message : "Gagal membandingkan pipeline."
+        );
+      } finally {
+        setComparing(false);
+      }
+    }, 20);
+  };
+
+  /** Salin kanvas hasil ke elemen <canvas> tampilan (pola pratinjau live). */
+  const drawCompareCanvas =
+    (src: HTMLCanvasElement | null) =>
+    (el: HTMLCanvasElement | null) => {
+      if (el && src) {
+        el.width = src.width;
+        el.height = src.height;
+        el.getContext("2d")?.drawImage(src, 0, 0);
+      }
+    };
 
   return (
     <div className="face-enhance-page">
@@ -451,6 +518,103 @@ export default function FaceEnhancePage() {
                 🧩 Susun ke Lembar A4
               </button>
             </div>
+          </section>
+
+          <section className="panel">
+            <div className="compare-header">
+              <div>
+                <h3>⚖️ Perbandingan Kualitas: Face Enhance vs Video Face Enhance</h3>
+                <p className="hint" style={{ marginTop: 4, marginBottom: 0 }}>
+                  Jalankan kedua pipeline pada frame foto yang sama lalu lihat
+                  metrik perbedaan (PSNR/diff).
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={comparing}
+                onClick={runCompare}
+              >
+                {comparing ? "⏳ Membandingkan…" : "🔬 Bandingkan pada frame ini"}
+              </button>
+            </div>
+
+            {compare && (
+              <>
+                {compareMetrics ? (
+                  <div className="compare-metrics">
+                    <div className="metric metric-psnr">
+                      <span className="metric-label">PSNR</span>
+                      <span className="metric-value">
+                        {compareMetrics.psnr == null
+                          ? "—"
+                          : compareMetrics.psnr === Infinity
+                            ? "∞ dB — identik"
+                            : `${compareMetrics.psnr.toFixed(1)} dB`}
+                      </span>
+                    </div>
+                    <div className="metric">
+                      <span className="metric-label">Δ rata-rata</span>
+                      <span className="metric-value">
+                        {compareMetrics.meanAbsDiff.toFixed(2)} / 255
+                      </span>
+                    </div>
+                    <div className="metric">
+                      <span className="metric-label">Δ maks</span>
+                      <span className="metric-value">
+                        {compareMetrics.maxDiff} / 255
+                      </span>
+                    </div>
+                    <div className="metric">
+                      <span className="metric-label">Piksel berubah (&gt;8)</span>
+                      <span className="metric-value">
+                        {compareMetrics.pctChanged.toFixed(1)}%
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="error">
+                    Dimensi hasil berbeda — PSNR tidak dapat dihitung.
+                  </p>
+                )}
+
+                <div className="bg-compare">
+                  <figure>
+                    <figcaption>
+                      Face Enhance (CodeFormer) —{" "}
+                      {compare.result.face.canvas.width}×
+                      {compare.result.face.canvas.height} px · wajah{" "}
+                      {compare.result.face.faceDetected
+                        ? "ditemukan"
+                        : "tidak ditemukan"}
+                    </figcaption>
+                    <canvas
+                      className="bg-preview-img"
+                      ref={drawCompareCanvas(compare.result.face.canvas)}
+                    />
+                  </figure>
+                  <figure>
+                    <figcaption>
+                      Video Face Enhance (PGTFormer) —{" "}
+                      {compare.result.video.canvas.width}×
+                      {compare.result.video.canvas.height} px · temporal{" "}
+                      {compare.videoParams.temporal} · resolusi kerja{" "}
+                      {compare.resMode}
+                    </figcaption>
+                    <canvas
+                      className="bg-preview-img"
+                      ref={drawCompareCanvas(compare.result.video.canvas)}
+                    />
+                  </figure>
+                </div>
+
+                <p className="hint">
+                  {compareMetrics?.psnr === Infinity
+                    ? "Hasil identik: kedua modul memakai inti pipeline yang sama per frame (deteksi wajah → pemulihan di kotak wajah), dan pada foto diam koherensi temporal video bersifat identitas. Perbedaan muncul bila parameter tiap modul disetel berbeda."
+                    : `Perbedaan berasal dari parameter tersimpan tiap modul (video memakai slider video-nya sendiri, mis. fidelitas ${compare.videoParams.fidelity}, temporal ${compare.videoParams.temporal}) dan resolusi kerja video (${compare.resMode}). Keduanya memakai inti pipeline yang sama; koherensi temporal hanya aktif antar frame video.`}
+                </p>
+              </>
+            )}
           </section>
         </>
       )}
