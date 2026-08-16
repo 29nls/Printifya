@@ -1,6 +1,11 @@
 import { jsPDF } from "jspdf";
+import {
+  createWorkerClient,
+  type WorkerClient,
+} from "../../shared/createWorkerClient";
+import { downloadUrl } from "../../shared/downloadUrl";
 import type { PasFotoSize } from "./pasFotoSize";
-import { getPaper, type PaperSize } from "./paperSize";
+import { getPaper } from "./paperSize";
 import {
   computeSheetLayout,
   fitsA4,
@@ -8,8 +13,11 @@ import {
   sheetCellRect,
   sheetLabelBarMm,
   sheetPageCount,
-  type SheetOrientation,
 } from "./sheetLayout";
+import type {
+  PdfWorkerRequestNoId,
+  PdfWorkerResponse,
+} from "./exportPdfWorkerApi";
 
 // Matematika tata letak lembar kini tinggal di sheetLayout.ts (tanpa jsPDF);
 // re-ekspor ini menjaga pemakai lama tetap berfungsi tanpa perubahan.
@@ -23,21 +31,10 @@ export {
   type SheetOrientation,
 } from "./sheetLayout";
 
-export interface PdfSheetOptions {
-  cols: number;
-  rows: number;
-  marginCm: number;
-  /** Ukuran kertas halaman; default A4. */
-  paper?: PaperSize;
-  /** Orientasi lembar; default potret (otomatis lanskap bila grid lebih muat melintang). */
-  orientation?: SheetOrientation;
-  /** Label per foto (indeks sejajar dengan dataUrls); digambar di dasar tiap sel. */
-  labels?: string[];
-  /** Ukuran font label dalam pt. */
-  labelSizePt?: number;
-  /** Garis potong putus-putus antar sel (mudah dipotong setelah cetak). */
-  cutLines?: boolean;
-}
+/** Opsi lembar PDF — kontrak bersama thread utama & worker (types-only file
+ *  exportPdfWorkerApi.ts; re-ekspor menjaga pemakai lama). */
+export type { PdfSheetOptions } from "./exportPdfWorkerApi";
+import type { PdfSheetOptions } from "./exportPdfWorkerApi";
 
 /** Komposit gambar di atas latar putih lalu encode JPEG agar PDF lebih ringkas. */
 function toJpegOnWhite(dataUrl: string): Promise<string> {
@@ -63,17 +60,16 @@ function toJpegOnWhite(dataUrl: string): Promise<string> {
 }
 
 /**
- * Bangun dokumen PDF berisi grid pas foto pada ukuran fisik presisi (mm),
- * margin sesuai pengaturan, dan grid diratakan di tengah halaman — tata
- * letak dihitung oleh sheetLayout.ts, sama persis dengan pratinjau & cetak.
- *
- * `dataUrls` bisa berupa satu gambar (diulang di semua sel — pola pas foto)
- * atau daftar gambar yang diisi sel per sel; bila lebih banyak dari jumlah
- * sel, dibuat halaman tambahan secara otomatis (Auto Layout).
+ * Perakitan isi dokumen PDF (grid sel, label, garis potong, multi-halaman) —
+ * MURNI (jsPDF + sheetLayout, tanpa DOM): SUMBER TUNGGAL tata letak untuk
+ * jalur thread utama (`buildSheetDoc`) DAN Web Worker (`exportPdf.worker.ts`),
+ * sehingga kedua jalur menghasilkan dokumen yang setara. `jpegs` = data URL
+ * JPEG di atas putih, `size`/`options` = preset & pengaturan lembar.
  */
-async function buildSheetDoc(
+export function assembleSheet(
+  doc: jsPDF,
+  jpegs: string[],
   size: PasFotoSize,
-  dataUrls: string | string[],
   {
     cols,
     rows,
@@ -83,27 +79,15 @@ async function buildSheetDoc(
     labels,
     labelSizePt,
     cutLines,
-  }: PdfSheetOptions,
-  autoPrint: boolean
-): Promise<jsPDF> {
+  }: PdfSheetOptions
+): void {
   const p = getPaper(paper?.id);
   const orient = orientation ?? "portrait";
-  const d = orientedDims(p, orient);
   if (!fitsA4(size, cols, rows, marginCm, p, orient)) {
     throw new Error(
       `Grid ${cols}×${rows} tidak muat di ${p.name} (${orient}) dengan margin ${marginCm} cm`
     );
   }
-
-  const urls = Array.isArray(dataUrls) ? dataUrls : [dataUrls];
-  const jpegs = await Promise.all(urls.map(toJpegOnWhite));
-  // jsPDF v4 menormalkan format [w,h] ke potret; orientasi lanskap harus
-  // dinyatakan eksplisit agar halaman benar-benar diputar melintang.
-  const doc = new jsPDF({
-    unit: "mm",
-    format: [d.widthMm, d.heightMm],
-    orientation: orient === "landscape" ? "landscape" : "portrait",
-  });
 
   const layout = computeSheetLayout(size, cols, rows, marginCm, p, orient);
   const pages = sheetPageCount(jpegs.length, layout.count);
@@ -151,9 +135,105 @@ async function buildSheetDoc(
       doc.restoreGraphicsState();
     }
   }
+}
 
+/**
+ * Bangun dokumen PDF berisi grid pas foto pada ukuran fisik presisi (mm),
+ * margin sesuai pengaturan, dan grid diratakan di tengah halaman — tata
+ * letak dihitung oleh sheetLayout.ts / assembleSheet, sama persis dengan
+ * pratinjau & cetak. Jalur THREAD UTAMA (fallback): dipakai bila tidak ada
+ * Worker; hasil dokumen setara dengan jalur worker (perakitan bersama).
+ *
+ * `dataUrls` bisa berupa satu gambar (diulang di semua sel — pola pas foto)
+ * atau daftar gambar yang diisi sel per sel; bila lebih banyak dari jumlah
+ * sel, dibuat halaman tambahan secara otomatis (Auto Layout).
+ */
+async function buildSheetDoc(
+  size: PasFotoSize,
+  dataUrls: string | string[],
+  options: PdfSheetOptions,
+  autoPrint: boolean
+): Promise<jsPDF> {
+  const p = getPaper(options.paper?.id);
+  const orient = options.orientation ?? "portrait";
+  const d = orientedDims(p, orient);
+  const urls = Array.isArray(dataUrls) ? dataUrls : [dataUrls];
+  const jpegs = await Promise.all(urls.map(toJpegOnWhite));
+  // jsPDF v4 menormalkan format [w,h] ke potret; orientasi lanskap harus
+  // dinyatakan eksplisit agar halaman benar-benar diputar melintang.
+  const doc = new jsPDF({
+    unit: "mm",
+    format: [d.widthMm, d.heightMm],
+    orientation: orient === "landscape" ? "landscape" : "portrait",
+  });
+  assembleSheet(doc, jpegs, size, options);
   if (autoPrint) doc.autoPrint();
   return doc;
+}
+
+// --- Jalur Web Worker (pola createWorkerClient) ---
+// Perakitan PDF (konversi JPEG + jsPDF) berjalan di worker agar UI tidak
+// membeku pada lembar besar (terukur: ~286 ms/1 halaman, ~689 ms/2 halaman,
+// skala ~340 ms/halaman — membeku detik-detik pada grid besar seperti 30R).
+// Worker dibuat lazy sekali; bila gagal/tanpa Worker → fallback thread utama
+// (buildSheetDoc) dengan hasil setara (assembleSheet sumber bersama).
+
+type PdfWorkerClient = WorkerClient<PdfWorkerRequestNoId, PdfWorkerResponse>;
+
+let pdfWorkerClient: PdfWorkerClient | null = null;
+
+function getPdfWorkerClient(): PdfWorkerClient | null {
+  if (typeof Worker === "undefined" || typeof createImageBitmap !== "function") {
+    return null;
+  }
+  if (!pdfWorkerClient) {
+    pdfWorkerClient = createWorkerClient<PdfWorkerRequestNoId, PdfWorkerResponse>({
+      createWorker: () =>
+        new Worker(new URL("./exportPdf.worker.ts", import.meta.url), {
+          type: "module",
+        }),
+      errorMessage: "Worker PDF gagal.",
+    });
+  }
+  return pdfWorkerClient;
+}
+
+/**
+ * Bangun blob PDF — lewat Web Worker bila tersedia, fallback thread utama.
+ * `dataUrls` data URL ber-bingkai (kecil); worker melakukan konversi JPEG +
+ * perakitan + output blob (transfer zero-copy).
+ */
+export async function buildSheetBlob(
+  size: PasFotoSize,
+  dataUrls: string | string[],
+  options: PdfSheetOptions,
+  autoPrint: boolean
+): Promise<Blob> {
+  const client = getPdfWorkerClient();
+  if (client) {
+    try {
+      const urls = Array.isArray(dataUrls) ? dataUrls : [dataUrls];
+      const res = await client.post({
+        type: "build",
+        size,
+        dataUrls: urls,
+        options,
+        autoPrint,
+      });
+      if (!res.ok) throw new Error(res.error);
+      return res.blob;
+    } catch {
+      // Worker gagal (mis. tanpa createImageBitmap di worker) → jalur lama.
+    }
+  }
+  const doc = await buildSheetDoc(size, dataUrls, options, autoPrint);
+  return doc.output("blob");
+}
+
+/** Unduh blob sebagai file via downloadUrl (shared; revoke blob URL terpusat). */
+function downloadBlob(blob: Blob, name: string): void {
+  const url = URL.createObjectURL(blob);
+  downloadUrl(url, name);
 }
 
 /** Ekspor PDF sebagai file yang diunduh. */
@@ -162,9 +242,9 @@ export async function exportPasFotoPdf(
   dataUrl: string,
   options: PdfSheetOptions
 ): Promise<void> {
-  const doc = await buildSheetDoc(size, dataUrl, options, false);
+  const blob = await buildSheetBlob(size, dataUrl, options, false);
   const paperId = getPaper(options.paper?.id).id;
-  doc.save(`${size.fileName}-${paperId}.pdf`);
+  downloadBlob(blob, `${size.fileName}-${paperId}.pdf`);
 }
 
 /** Ekspor PDF layout: banyak foto disusun sel per sel, multi-halaman bila perlu. */
@@ -173,43 +253,45 @@ export async function exportLayoutPdf(
   srcs: string[],
   options: PdfSheetOptions
 ): Promise<void> {
-  const doc = await buildSheetDoc(size, srcs, options, false);
+  const blob = await buildSheetBlob(size, srcs, options, false);
   const paperId = getPaper(options.paper?.id).id;
-  doc.save(`${size.fileName}-layout-${paperId}.pdf`);
+  downloadBlob(blob, `${size.fileName}-layout-${paperId}.pdf`);
+}
+
+/** Buka PDF template di tab baru (autoPrint sudah di-set — di worker bila ada). */
+async function openPrintPdf(
+  size: PasFotoSize,
+  dataUrls: string | string[],
+  options: PdfSheetOptions
+): Promise<boolean> {
+  const blob = await buildSheetBlob(size, dataUrls, options, true);
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, "_blank");
+  // Biarkan viewer sempat memuat PDF sebelum URL di-revoke.
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return win !== null;
 }
 
 /**
  * Buka PDF template di tab baru dan memicu dialog cetak browser (autoPrint).
  * Mengembalikan `false` jika pop-up diblokir.
  */
-export async function printPasFotoPdf(
+export function printPasFotoPdf(
   size: PasFotoSize,
   dataUrl: string,
   options: PdfSheetOptions
 ): Promise<boolean> {
-  const doc = await buildSheetDoc(size, dataUrl, options, true);
-  const blob = doc.output("blob");
-  const url = URL.createObjectURL(blob);
-  const win = window.open(url, "_blank");
-  // Biarkan viewer sempat memuat PDF sebelum URL di-revoke.
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
-  return win !== null;
+  return openPrintPdf(size, dataUrl, options);
 }
 
 /**
  * Buka PDF layout (banyak orang) di tab baru dan memicu dialog cetak browser.
  * Mengembalikan `false` jika pop-up diblokir.
  */
-export async function printLayoutPdf(
+export function printLayoutPdf(
   size: PasFotoSize,
   srcs: string[],
   options: PdfSheetOptions
 ): Promise<boolean> {
-  const doc = await buildSheetDoc(size, srcs, options, true);
-  const blob = doc.output("blob");
-  const url = URL.createObjectURL(blob);
-  const win = window.open(url, "_blank");
-  // Biarkan viewer sempat memuat PDF sebelum URL di-revoke.
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
-  return win !== null;
+  return openPrintPdf(size, srcs, options);
 }
