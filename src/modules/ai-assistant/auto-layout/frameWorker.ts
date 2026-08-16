@@ -38,6 +38,20 @@ export type FrameWorkerClient = WorkerClient<
   FrameWorkerResponse
 >;
 
+/**
+ * Bagi batch merata ke `n` bucket secara round-robin (urutan tiap bucket
+ * dipertahankan). `k = min(n, items.length)` — bucket kosong di bagian akhir
+ * bila foto lebih sedikit dari worker. SUMBER TUNGGAL slicing pool: diekstrak
+ * agar distribusi & semantik pembatalan punya regresi otomatis tanpa
+ * Worker/fetch nyata (diuji di frameWorker.test.ts).
+ */
+export function splitBatch<T>(items: T[], n: number): T[][] {
+  const k = Math.min(n, items.length);
+  return Array.from({ length: k }, (_, i) =>
+    items.filter((_, j) => j % k === i)
+  );
+}
+
 /** Worker dibuat lazy per klien — pool kecil agar batch paralel aman memori. */
 export function createFrameWorkerPool(size = 3): FrameWorkerClient[] {
   const n = Math.max(
@@ -158,11 +172,9 @@ export async function frameAll(
     return result;
   }
   // Pool: bagi batch merata per worker (bagian berurutan di tiap worker,
-  // satu blob per permintaan — memori aman).
-  const n = Math.min(clients.length, items.length);
-  const slices = Array.from({ length: n }, (_, i) =>
-    items.filter((_, j) => j % n === i)
-  );
+  // satu blob per permintaan — memori aman). `splitBatch` sumber tunggal
+  // slicing (ekivalen dengan Math.min(clients.length, items.length)).
+  const slices = splitBatch(items, clients.length);
   const parts = await Promise.all(
     slices.map((slice, i) =>
       frameSlice(clients[i], slice, frame, width, height, defaults, isCancelled)
