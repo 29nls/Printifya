@@ -7,6 +7,7 @@ import {
   computePeaks,
   computeWaveStats,
   countFrames,
+  formatTimecode,
   DEFAULT_VIDEO_PARAMS,
   FPS_OPTIONS,
   FORMATS,
@@ -186,6 +187,10 @@ export default function VideoFaceEnhancePage() {
   // videoRef tersembunyi — yang TIDAK boleh diputar agar drawImage tidak
   // men-taint canvas).
   const srcVideoRef = useRef<HTMLVideoElement>(null);
+  // Span timecode di atas tiap video banding — ditulis langsung dari loop rAF
+  // (dan timeupdate saat scrub manual) tanpa state React, agar 60 fps murah.
+  const srcTimeRef = useRef<HTMLSpanElement | null>(null);
+  const resTimeRef = useRef<HTMLSpanElement | null>(null);
   // Loop sinkronisasi rAF pemutaran banding (null = tidak berjalan).
   const syncLoopRef = useRef<number | null>(null);
   const cancelledRef = useRef(false);
@@ -778,6 +783,8 @@ export default function VideoFaceEnhancePage() {
     } catch {
       // abaikan
     }
+    if (srcTimeRef.current) srcTimeRef.current.textContent = "0:00:00.0";
+    if (resTimeRef.current) resTimeRef.current.textContent = "0:00:00.0";
     void Promise.allSettled([src.play(), res.play()]);
     const tick = () => {
       if (!src || !res) return;
@@ -797,6 +804,14 @@ export default function VideoFaceEnhancePage() {
           res.currentTime = src.currentTime; // master = sumber
         }
       }
+      // Timecode sinkron di atas kedua video — diperbarui tiap frame agar
+      // terlihat sejajar (nilai sama) atau melenceng (nilai beda).
+      if (srcTimeRef.current) {
+        srcTimeRef.current.textContent = formatTimecode(src.currentTime);
+      }
+      if (resTimeRef.current) {
+        resTimeRef.current.textContent = formatTimecode(res.currentTime);
+      }
       if (src.ended || res.ended) {
         stopBoth();
         return;
@@ -813,6 +828,12 @@ export default function VideoFaceEnhancePage() {
     if (srcVideoRef.current) srcVideoRef.current.muted = next;
     if (resultVideoRef.current) resultVideoRef.current.muted = next;
   }
+
+  // Timecode banding di-reset ke 0:00:00.0 saat hasil baru dibuat.
+  useEffect(() => {
+    if (srcTimeRef.current) srcTimeRef.current.textContent = "0:00:00.0";
+    if (resTimeRef.current) resTimeRef.current.textContent = "0:00:00.0";
+  }, [resultUrl]);
 
   /** Ambil frame video hasil saat ini (posisi pemutaran pengguna) → data URL. */
   const captureResultFrame = (): Promise<string> => {
@@ -1279,23 +1300,47 @@ export default function VideoFaceEnhancePage() {
             <section className="panel">
               <div className="bg-compare">
                 <figure>
-                  <figcaption>Sebelum (video asli)</figcaption>
+                  <figcaption>
+                    Sebelum (video asli)
+                    <span className="compare-time" ref={srcTimeRef}>
+                      0:00:00.0
+                    </span>
+                  </figcaption>
                   <video
                     ref={srcVideoRef}
                     src={videoUrl}
                     controls
                     muted={compareMuted}
                     className="bg-preview-img"
+                    onTimeUpdate={() => {
+                      if (srcTimeRef.current) {
+                        srcTimeRef.current.textContent = formatTimecode(
+                          srcVideoRef.current?.currentTime ?? 0
+                        );
+                      }
+                    }}
                   />
                 </figure>
                 <figure>
-                  <figcaption>Sesudah (face restored)</figcaption>
+                  <figcaption>
+                    Sesudah (face restored)
+                    <span className="compare-time" ref={resTimeRef}>
+                      0:00:00.0
+                    </span>
+                  </figcaption>
                   <video
                     ref={resultVideoRef}
                     src={resultUrl}
                     controls
                     muted={compareMuted}
                     className="bg-preview-img"
+                    onTimeUpdate={() => {
+                      if (resTimeRef.current) {
+                        resTimeRef.current.textContent = formatTimecode(
+                          resultVideoRef.current?.currentTime ?? 0
+                        );
+                      }
+                    }}
                   />
                 </figure>
               </div>

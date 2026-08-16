@@ -166,6 +166,18 @@ export function computePeaks(buffer: AudioBuffer, buckets = 160): Float32Array {
   return peaks;
 }
 
+/** Timecode HH:MM:SS.d — tampilan sinkron di atas video banding A/B
+ *  (nilai yang sama di kedua pemutar saat sejajar). Murni, bisa diuji. */
+export function formatTimecode(t: number): string {
+  if (!Number.isFinite(t) || t < 0) return "0:00:00.0";
+  const totalTenths = Math.floor(t * 10);
+  const h = Math.floor(totalTenths / 36000);
+  const m = Math.floor((totalTenths % 36000) / 600);
+  const s = Math.floor((totalTenths % 600) / 10);
+  const d = totalTenths % 10;
+  return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${d}`;
+}
+
 /** Statistik ringkas audio sumber untuk tooltip waveform: puncak (dB) dari
  *  bucket peak (0..1) + durasi + jumlah kanal. Murni — bisa diuji tanpa DOM.
  *  `peakDb` ≤ 0 dB (full-scale = 0), `-Infinity` untuk senyap penuh. */

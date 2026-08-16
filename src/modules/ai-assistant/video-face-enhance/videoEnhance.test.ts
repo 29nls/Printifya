@@ -3,6 +3,7 @@ import {
   computePeaks,
   computeWaveStats,
   countFrames,
+  formatTimecode,
   DEFAULT_VIDEO_PARAMS,
   pickWorkingSize,
   processFramePixels,
@@ -365,3 +366,32 @@ describe("computeWaveStats — statistik tooltip waveform", () => {
   });
 });
 
+describe("formatTimecode — timecode HH:MM:SS.d untuk banding A/B", () => {
+  it("0 → 0:00:00.0", () => {
+    expect(formatTimecode(0)).toBe("0:00:00.0");
+  });
+
+  it("12,3 dtk → 0:00:12.3 (contoh pada permintaan)", () => {
+    expect(formatTimecode(12.34)).toBe("0:00:12.3");
+  });
+
+  it("menit: 65,4 dtk → 0:01:05.4", () => {
+    expect(formatTimecode(65.4)).toBe("0:01:05.4");
+  });
+
+  it("jam: 3723,5 dtk → 1:02:03.5", () => {
+    expect(formatTimecode(3723.5)).toBe("1:02:03.5");
+  });
+
+  it("truncate ke persepuluhan (59,99 → 0:00:59.9, bukan 60.0)", () => {
+    // Timecode live menampilkan waktu yang SUDAH lewat (truncate), bukan
+    // pembulatan — konsisten dengan perilaku pemutar video.
+    expect(formatTimecode(59.99)).toBe("0:00:59.9");
+  });
+
+  it("negatif/NaN/Infinity → 0:00:00.0", () => {
+    expect(formatTimecode(-1)).toBe("0:00:00.0");
+    expect(formatTimecode(NaN)).toBe("0:00:00.0");
+    expect(formatTimecode(Infinity)).toBe("0:00:00.0");
+  });
+});

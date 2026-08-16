@@ -31,6 +31,20 @@
   width: 170px;
 }
 
+/* Timecode sinkron di atas tiap video banding (format HH:MM:SS.d). */
+.compare-time {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 7px;
+}
+
 /* Kontrol pemutaran banding sebelum/sesudah (putar sinkron + mute eksplisit). */
 .compare-controls {
   display: flex;
