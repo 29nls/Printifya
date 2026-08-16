@@ -5,6 +5,7 @@ import {
   type RecordWithAudioAudio,
 } from "../../shared/recordWithAudio";
 import ResetPreferencesButton from "../../shared/ResetPreferencesButton";
+import { downloadUrl } from "../../shared/downloadUrl";
 import {
   createSharedAudioState,
   decodeAudioBuffer,
@@ -649,13 +650,15 @@ export default function SlideshowToVideoPage() {
               <div className="slideshow-result">
                 <video src={resultUrl} controls loop />
                 <div className="slideshow-controls">
-                  <a
+                  <button
+                    type="button"
                     className="btn btn-primary"
-                    href={resultUrl}
-                    download="slideshow.webm"
+                    onClick={() =>
+                      downloadUrl(resultUrl, "slideshow.webm", { revoke: false })
+                    }
                   >
                     ⬇️ Unduh WebM
-                  </a>
+                  </button>
                   <button type="button" className="btn" onClick={clearAll}>
                     🔄 Video Lain
                   </button>

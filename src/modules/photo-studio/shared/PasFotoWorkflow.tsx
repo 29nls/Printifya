@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { setPendingPasFoto } from "../../shared/pasFotoBridge";
+import { downloadUrl } from "../../shared/downloadUrl";
 import {
   setPendingLayoutPhoto,
   setPendingLayoutPhotos,
@@ -301,10 +302,7 @@ export default function PasFotoWorkflow({
 
   const download = () => {
     if (!croppedUrl) return;
-    const a = document.createElement("a");
-    a.href = croppedUrl;
-    a.download = `${activeSize.fileName}.png`;
-    a.click();
+    downloadUrl(croppedUrl, `${activeSize.fileName}.png`, { revoke: false });
   };
 
   /** Teruskan hasil (data URL) ke alur crop Pas Foto 3x4 via bridge antar modul. */

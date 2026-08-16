@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { downloadUrl } from "../../shared/downloadUrl";
 import "../../photo-studio/shared/style.css";
 import "./style.css";
 
@@ -218,10 +219,7 @@ export default function PdfEditorPage() {
 
   const download = () => {
     if (!selected) return;
-    const a = document.createElement("a");
-    a.href = selected.url;
-    a.download = selected.name;
-    a.click();
+    downloadUrl(selected.url, selected.name, { revoke: false });
   };
 
   return (

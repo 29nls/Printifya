@@ -24,6 +24,7 @@ import {
 } from "./optionsStorage";
 import { comparePipelines, type CompareResult } from "./qualityCompare";
 import { pickWorkingSize } from "../../shared/facePipeline";
+import { downloadUrl } from "../../shared/downloadUrl";
 import type { VideoEnhanceParams } from "../video-face-enhance/videoEnhance";
 import { loadVideoPrefs } from "../video-face-enhance/optionsStorage";
 import ResetPreferencesButton from "../../shared/ResetPreferencesButton";
@@ -277,12 +278,7 @@ export default function FaceEnhancePage() {
   const download = withBusy("download", async () => {
     // Urutan CodeFormer → Real-ESRGAN: restore dulu, lalu perbesar hasilnya.
     const blob = await processFullRes();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "face-enhanced.png";
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    downloadUrl(URL.createObjectURL(blob), "face-enhanced.png");
   });
 
   /** Blob hasil → data URL (modul tujuan memakai data URL: pas foto bahkan

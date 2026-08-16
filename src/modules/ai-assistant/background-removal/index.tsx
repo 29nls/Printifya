@@ -7,6 +7,7 @@ import {
 } from "./bgRemove";
 import { setPendingPasFoto } from "../../shared/pasFotoBridge";
 import { setPendingLayoutPhoto } from "../../shared/autoLayoutBridge";
+import { downloadUrl } from "../../shared/downloadUrl";
 import {
   clearBgOptions,
   loadLayoutPrefix,
@@ -190,10 +191,7 @@ export default function BackgroundRemovalPage() {
 
   const download = () => {
     if (!resultUrl) return;
-    const a = document.createElement("a");
-    a.href = resultUrl;
-    a.download = `background-removed-${bgId}.png`;
-    a.click();
+    downloadUrl(resultUrl, `background-removed-${bgId}.png`);
   };
 
   /** Ekspor mask alpha (padanan rembg `-om / --only-mask`). */
@@ -201,10 +199,7 @@ export default function BackgroundRemovalPage() {
     const mask = maskRef.current;
     if (!mask) return;
     const base = fileName.replace(/\.[^.]+$/, "") || "background-removed";
-    const a = document.createElement("a");
-    a.href = mask.toDataURL("image/png");
-    a.download = `${base}-mask.png`;
-    a.click();
+    downloadUrl(mask.toDataURL("image/png"), `${base}-mask.png`);
   };
 
   /** Teruskan hasil (dengan warna latar terpilih) ke alur crop Pas Foto 3x4. */

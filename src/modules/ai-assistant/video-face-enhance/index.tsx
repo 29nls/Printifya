@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { type FaceEnhanceParams } from "../../shared/facePipeline";
 import { setPendingPasFoto } from "../../shared/pasFotoBridge";
 import { setPendingLayoutPhoto } from "../../shared/autoLayoutBridge";
+import { downloadUrl } from "../../shared/downloadUrl";
 import {
   computePeaks,
   computeWaveStats,
@@ -932,10 +933,7 @@ export default function VideoFaceEnhancePage() {
   const download = () => {
     if (!resultUrl) return;
     const base = fileName.replace(/\.[^.]+$/, "") || "video-face";
-    const a = document.createElement("a");
-    a.href = resultUrl;
-    a.download = `${base}-face-restored.${resultExt}`;
-    a.click();
+    downloadUrl(resultUrl, `${base}-face-restored.${resultExt}`, { revoke: false });
   };
 
   return (

@@ -4,6 +4,7 @@ import type { PasFotoSize } from "../../photo-studio/shared/pasFotoSize";
 import CropperEditor from "../../photo-studio/shared/CropperEditor";
 import { setPendingPasFoto } from "../../shared/pasFotoBridge";
 import { setPendingLayoutPhoto } from "../../shared/autoLayoutBridge";
+import { downloadUrl } from "../../shared/downloadUrl";
 import { autoCropFace } from "./autocrop";
 import {
   clearFacePercent,
@@ -170,10 +171,7 @@ export default function AutoCropFacePage() {
 
   const download = () => {
     if (!croppedUrl) return;
-    const a = document.createElement("a");
-    a.href = croppedUrl;
-    a.download = `${size.fileName}.png`;
-    a.click();
+    downloadUrl(croppedUrl, `${size.fileName}.png`);
   };
 
   /** Teruskan hasil crop ke alur Pas Foto 3x4 (crop ulang + template A4). */

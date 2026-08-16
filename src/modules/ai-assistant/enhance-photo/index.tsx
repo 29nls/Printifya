@@ -8,6 +8,7 @@ import {
 } from "./enhance";
 import { setPendingLayoutPhoto } from "../../shared/autoLayoutBridge";
 import SyncedPhotoCompare from "../../shared/SyncedPhotoCompare";
+import { downloadUrl } from "../../shared/downloadUrl";
 import {
   clearEnhanceOptions,
   loadLayoutPrefix,
@@ -126,10 +127,7 @@ export default function EnhancePhotoPage() {
   const download = () => {
     if (!img) return;
     const full = enhanceImage(img, params);
-    const a = document.createElement("a");
-    a.href = full.toDataURL("image/png");
-    a.download = "enhanced-photo.png";
-    a.click();
+    downloadUrl(full.toDataURL("image/png"), "enhanced-photo.png");
   };
 
   /** Kirim hasil enhance (resolusi penuh) ke Auto Layout untuk lembar A4. */

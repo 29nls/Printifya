@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { printHtmlSheet } from "../../print-center/printer-lokal/printHtml";
+import { downloadUrl } from "../../shared/downloadUrl";
 import {
   buildCsv,
   buildSheetHtml,
@@ -230,11 +231,7 @@ export default function ExcelSheetPage() {
     const csv = buildCsv(grids, activeSheet, getFormat);
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `spreadsheet-${SHEET_NAMES[activeSheet].toLowerCase()}.csv`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    downloadUrl(url, `spreadsheet-${SHEET_NAMES[activeSheet].toLowerCase()}.csv`);
   };
 
   const handlePrint = () => {

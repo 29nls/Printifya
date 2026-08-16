@@ -14,6 +14,7 @@ import type {
   Waifu2xWorkerResponse,
 } from "./waifu2xWorkerApi";
 import { createWorkerClient } from "../../shared/createWorkerClient";
+import { downloadUrl } from "../../shared/downloadUrl";
 import { setPendingPasFoto } from "../../shared/pasFotoBridge";
 import {
   setPendingLayoutPhoto,
@@ -538,12 +539,7 @@ export default function UpscaleDenoisePage() {
 
   const download = (it: Item) => {
     if (!it.resultUrl) return;
-    const a = document.createElement("a");
-    a.href = it.resultUrl;
-    a.download = resultFileName(it);
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    downloadUrl(it.resultUrl, resultFileName(it), { revoke: false });
   };
 
   /** Unduh semua hasil siap — berurutan dengan jeda agar browser tidak
@@ -559,12 +555,7 @@ export default function UpscaleDenoisePage() {
     setDownloading(true);
     for (let i = 0; i < ready.length; i++) {
       const it = ready[i];
-      const a = document.createElement("a");
-      a.href = it.resultUrl!;
-      a.download = resultFileName(it);
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      downloadUrl(it.resultUrl!, resultFileName(it), { revoke: false });
       setDlProgress(i + 1);
       await new Promise((r) => setTimeout(r, 350));
     }
