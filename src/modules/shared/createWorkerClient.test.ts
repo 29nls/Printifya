@@ -152,6 +152,52 @@ describe("createWorkerClient — plumbing async worker", () => {
     expect(resolves).toBe(1);
   });
 
+  it("dua balasan id SAMA beruntun: resolve tepat sekali, balasan kedua diabaikan", async () => {
+    const client = makeClient();
+    const p1 = client.post({ n: 1 });
+    const p2 = client.post({ n: 2 });
+    const w = FakeWorker.instances[0];
+    // Dua balasan id 1 beruntun — yang pertama resolve, yang kedua (basi)
+    // tidak boleh resolve apa pun (listener id 1 sudah dilepas).
+    w.dispatchMessage(res(1, { n: 11 }));
+    w.dispatchMessage(res(1, { n: 111 }));
+    expect(w.listenerCount("message")).toBe(1); // hanya id 2 tersisa
+    // p2 tetap menunggu — balasan id basi tidak menyentuhnya.
+    let settled2 = false;
+    void p2.then(() => (settled2 = true));
+    await Promise.resolve();
+    expect(settled2).toBe(false);
+    await expect(p1).resolves.toEqual({ id: 1, n: 11 });
+    // Balasan kedua id 1 TIDAK mengubah hasil p1 (tetap balasan pertama).
+    expect(await p1).toEqual({ id: 1, n: 11 });
+    w.dispatchMessage(res(2, { n: 22 }));
+    await expect(p2).resolves.toEqual({ id: 2, n: 22 });
+    expect(w.listenerCount("message")).toBe(0);
+  });
+
+  it("event error saat POST KEDUA: hanya permintaan kedua yang reject, klien tetap dipakai", async () => {
+    const client = makeClient();
+    const p1 = client.post({ n: 1 });
+    const p2 = client.post({ n: 2 });
+    const w = FakeWorker.instances[0];
+    // Post pertama resolve bersih — listener-nya dilepas SEBELUM error datang.
+    w.dispatchMessage(res(1, { n: 11 }));
+    await p1;
+    expect(w.listenerCount("message")).toBe(1); // hanya id 2 menunggu
+    w.dispatchError();
+    await expect(p2).rejects.toThrow("Worker gagal memproses.");
+    // Semua listener dibersihkan setelah settle — tidak ada yang bocor.
+    expect(w.listenerCount("message")).toBe(0);
+    expect(w.listenerCount("error")).toBe(0);
+    // Post berikutnya memakai worker yang SAMA (error satu pesan tidak
+    // merusak klien) dan bekerja normal saat worker pulih.
+    const p3 = client.post({ n: 3 });
+    expect(FakeWorker.instances).toHaveLength(1);
+    expect(w.posted[w.posted.length - 1].msg.id).toBe(3);
+    w.dispatchMessage(res(3, { n: 33 }));
+    await expect(p3).resolves.toEqual({ id: 3, n: 33 });
+  });
+
   it("terminate menolak SEMUA permintaan tertunda lalu menghentikan worker", async () => {
     const client = makeClient();
     const p1 = client.post({ n: 1 });
