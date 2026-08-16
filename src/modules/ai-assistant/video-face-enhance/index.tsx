@@ -5,11 +5,8 @@ import { setPendingPasFoto } from "../../shared/pasFotoBridge";
 import { setPendingLayoutPhoto } from "../../shared/autoLayoutBridge";
 import { downloadUrl } from "../../shared/downloadUrl";
 import {
-  computePeaks,
-  computeWaveStats,
   countFrames,
   createFpsMeter,
-  createSharedAudioState,
   formatEta,
   formatTimecode,
   DEFAULT_VIDEO_PARAMS,
@@ -18,13 +15,11 @@ import {
   FRAME_SAMPLING,
   pickWorkingSize,
   processFramePixels,
-  resolveSharedAudioBuffer,
   RES_MODES,
   sampledBufferIndex,
   sampledFrames,
   samplingFactor,
   type FrameSampling,
-  type SharedAudioState,
   type VideoEnhanceParams,
 } from "./videoEnhance";
 import type {
@@ -32,7 +27,8 @@ import type {
   FaceWorkerResponse,
 } from "./faceWorkerApi";
 import { createWorkerClient } from "../../shared/createWorkerClient";
-import { decodeAudioBuffer } from "../../shared/audioShared";
+import { makeAudioContext, useWaveformAudio } from "./useWaveformAudio";
+import { useSyncCompare } from "./useSyncCompare";
 import {
   clearVideoOptions,
   loadVideoPrefs,
@@ -98,25 +94,6 @@ function seekTo(video: HTMLVideoElement, t: number): Promise<void> {
   });
 }
 
-/**
- * Buat AudioContext (dengan fallback webkit). Dipakai untuk memutar ulang
- * audio saat rekaman (dibuat/resume DALAM gestur klik).
- */
-function makeAudioContext(): AudioContext | null {
-  try {
-    const Ctor =
-      window.AudioContext ??
-      (window as unknown as { webkitAudioContext?: typeof AudioContext })
-        .webkitAudioContext;
-    return Ctor ? new Ctor() : null;
-  } catch {
-    return null;
-  }
-}
-
-/** Batas memori wajar untuk AudioBuffer (float32 × kanal × sampel) — video
- *  ultra-panjang direkam tanpa audio daripada memakai ratusan MB RAM. */
-const MAX_AUDIO_BYTES = 100 * 1024 * 1024;
 
 export default function VideoFaceEnhancePage() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -145,58 +122,11 @@ export default function VideoFaceEnhancePage() {
   const [faceFrames, setFaceFrames] = useState(0);
   // null = belum diketahui, true/false = video sumber punya/tanpa audio.
   const [hasAudio, setHasAudio] = useState<boolean | null>(null);
-  // Bisukan kedua pemutar banding (tombol mute eksplisit) — default suara
-  // menyala karena pemutaran dipicu gestur klik (autoplay diizinkan).
-  const [compareMuted, setCompareMuted] = useState(false);
-  // Status decode audio untuk indikator waveform: idle/decoding/ready/failed.
-  const [audioStatus, setAudioStatus] = useState<
-    "idle" | "decoding" | "ready" | "failed"
-  >("idle");
-  // Puncak waveform audio sumber (0..1 per bucket) — SVG mini di samping badge.
-  const [waveform, setWaveform] = useState<Float32Array | null>(null);
-  // Statistik ringkas untuk tooltip waveform (durasi, puncak dB, jumlah kanal).
-  const [waveStats, setWaveStats] = useState<{
-    duration: number;
-    peakDb: number;
-    channels: number;
-  } | null>(null);
-  // Pemutaran audio sumber untuk cek cepat (klik waveform): diputar via
-  // BufferSource → context.destination — elemen video TIDAK pernah diputar
-  // (menjaga drawImage agar tidak men-taint canvas).
-  const [wavePlaying, setWavePlaying] = useState(false);
-  const waveSourceRef = useRef<AudioBufferSourceNode | null>(null);
-  // Ref SVG waveform + bar rects (cache) untuk sorot bucket yang sedang
-  // berbunyi saat cek cepat — ditulis langsung dari loop rAF (tanpa re-render).
-  const waveSvgRef = useRef<SVGSVGElement>(null);
-  const waveBarsRef = useRef<SVGRectElement[]>([]);
-  const wavePlayheadRaf = useRef<number>(0);
-  const waveStartCtxTime = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileTokenRef = useRef(0);
-  const resultVideoRef = useRef<HTMLVideoElement>(null);
-  // Video sumber di panel banding sebelum/sesudah (elemen TERPISAH dari
-  // videoRef tersembunyi — yang TIDAK boleh diputar agar drawImage tidak
-  // men-taint canvas).
-  const srcVideoRef = useRef<HTMLVideoElement>(null);
-  // Span timecode di atas tiap video banding — ditulis langsung dari loop rAF
-  // (dan timeupdate saat scrub manual) tanpa state React, agar 60 fps murah.
-  const srcTimeRef = useRef<HTMLSpanElement | null>(null);
-  const resTimeRef = useRef<HTMLSpanElement | null>(null);
-  // Loop sinkronisasi rAF pemutaran banding (null = tidak berjalan).
-  const syncLoopRef = useRef<number | null>(null);
   const cancelledRef = useRef(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
-  // Audio sumber: AudioContext + buffer PCM hasil decode (sekali per video).
-  // Diputar ulang via BufferSource → MediaStreamDestination saat rekam —
-  // elemen video TIDAK pernah diputar (hanya di-seek/di-draw), karena
-  // memutar elemen video yang sudah pernah lewat WebAudio bisa membuat
-  // drawImage berikutnya men-taint canvas (perilaku Chromium).
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  // State bersama AudioBuffer sumber (buffer + promise): dibagi indikator
-  // waveform DAN perekaman via `resolveSharedAudioBuffer` — keduanya menerima
-  // instance yang sama, decode hanya sekali (lihat videoEnhance.ts).
-  const audioSharedRef = useRef<SharedAudioState>(createSharedAudioState());
   // Web Worker pipeline per-frame (deteksi wajah + enhancePixels +
   // temporalBlend) — UI tetap responsif untuk video panjang; fallback thread
   // utama bila browser tanpa Worker.
@@ -213,6 +143,8 @@ export default function VideoFaceEnhancePage() {
     []
   );
   const navigate = useNavigate();
+  const wave = useWaveformAudio(videoUrl, hasAudio);
+  const sync = useSyncCompare(resultUrl);
 
   // Persist semua opsi + awalan setiap berubah.
   useEffect(() => {
@@ -225,28 +157,17 @@ export default function VideoFaceEnhancePage() {
   // kali hasil baru dibuat — membuat run berikutnya kehilangan audio).
   const urlsRef = useRef({ videoUrl, resultUrl });
   urlsRef.current = { videoUrl, resultUrl };
-  // Bersihkan object URL + stop perekam + tutup AudioContext saat komponen dilepas.
+  // Bersihkan object URL + stop perekam saat komponen dilepas. Cleanup audio
+  // (playback cek cepat, AudioContext, buffer) & loop sinkronisasi banding
+  // dimiliki hook useWaveformAudio / useSyncCompare (ikut jalan saat unmount).
   useEffect(() => {
     return () => {
       cancelledRef.current = true;
-      stopWaveAudio();
       try {
         recorderRef.current?.stop();
       } catch {
         // abaikan
       }
-      if (audioCtxRef.current) {
-        try {
-          audioCtxRef.current.close();
-        } catch {
-          // abaikan
-        }
-        audioCtxRef.current = null;
-        // Objek state DIGANTI (bukan dimutasi): decode yang masih berjalan
-        // menulis ke objek lama → tidak bocor ke video berikutnya.
-        audioSharedRef.current = createSharedAudioState();
-      }
-      stopSyncLoop();
       // Hentikan worker per-frame: tolak permintaan yang masih menunggu agar
       // tidak menggantung, lalu terminate.
       faceWorkerClient.terminate();
@@ -259,160 +180,6 @@ export default function VideoFaceEnhancePage() {
 
 
 
-  /**
-   * Pastikan AudioBuffer sumber ter-decode (sekali per video; hasil di-cache
-   * di `audioSharedRef`). Dipakai indikator waveform (segera setelah upload)
-   * dan `run()` (saat rekaman) — keduanya berbagi promise yang sama, jadi
-   * tidak ada decode ganda atau race, dan menerima instance yang sama persis.
-   * `null` bila tanpa audio / decode gagal / terlalu besar.
-   */
-  const ensureAudioBuffer = (): Promise<AudioBuffer | null> =>
-    resolveSharedAudioBuffer(audioSharedRef.current, async () => {
-      if (!videoUrl) return null;
-      try {
-        const raw = await (await fetch(videoUrl)).arrayBuffer();
-        const decoded = await decodeAudioBuffer(raw);
-        const bytes =
-          decoded !== null
-            ? decoded.length *
-              decoded.numberOfChannels *
-              Float32Array.BYTES_PER_ELEMENT
-            : Infinity;
-        return bytes <= MAX_AUDIO_BYTES ? decoded : null;
-      } catch {
-        return null;
-      }
-    });
-
-  /** Bersihkan sorot bucket yang sedang berbunyi dari semua bar. */
-  const clearWaveActive = () => {
-    for (const b of waveBarsRef.current) {
-      b.classList.remove("wave-bar-active");
-    }
-  };
-
-  /** Hentikan pemutaran cek cepat audio sumber (klik waveform) bila sedang
-   *  berjalan — dipakai toggle, ganti video, dan cleanup unmount. */
-  const stopWaveAudio = () => {
-    cancelAnimationFrame(wavePlayheadRaf.current);
-    wavePlayheadRaf.current = 0;
-    clearWaveActive();
-    if (waveSourceRef.current) {
-      try {
-        waveSourceRef.current.stop();
-      } catch {
-        // sudah berhenti — abaikan
-      }
-      waveSourceRef.current = null;
-    }
-    setWavePlaying(false);
-  };
-
-  /**
-   * Putar/jeda audio sumber untuk cek cepat tanpa membuka pemutar penuh:
-   * klik waveform memutar AudioBuffer ter-decode (BufferSource → destination)
-   * dari awal; klik lagi menghentikannya. Elemen video tidak pernah diputar.
-   */
-  const toggleWaveAudio = () => {
-    const buf = audioSharedRef.current.buffer;
-    if (!buf) return;
-    if (waveSourceRef.current) {
-      stopWaveAudio();
-      return;
-    }
-    // Context dibuat/resume dalam gestur klik (autoplay dengan suara diizinkan).
-    const ctx =
-      audioCtxRef.current ?? (audioCtxRef.current = makeAudioContext());
-    if (!ctx) return;
-    void ctx.resume();
-    const src = ctx.createBufferSource();
-    src.buffer = buf;
-    src.connect(ctx.destination);
-    src.onended = () => {
-      waveSourceRef.current = null;
-      cancelAnimationFrame(wavePlayheadRaf.current);
-      wavePlayheadRaf.current = 0;
-      clearWaveActive();
-      setWavePlaying(false);
-    };
-    waveSourceRef.current = src;
-    try {
-      src.start();
-    } catch {
-      waveSourceRef.current = null;
-      setWavePlaying(false);
-      return;
-    }
-    // Loop playhead: sorot bucket yang sedang berbunyi mengikuti posisi
-    // BufferSource (ctx.currentTime - waktu mulai) — umpan balik waktu tanpa
-    // re-render React (menulis class langsung ke rect SVG).
-    const startCtxTime = ctx.currentTime;
-    waveStartCtxTime.current = startCtxTime;
-    const playheadTick = () => {
-      if (!waveSourceRef.current) {
-        clearWaveActive();
-        return;
-      }
-      const pos = Math.max(0, ctx.currentTime - startCtxTime);
-      const dur = buf.duration || 0;
-      const bars = waveBarsRef.current;
-      if (bars.length > 0 && dur > 0) {
-        const idx = Math.min(
-          bars.length - 1,
-          Math.floor((pos / dur) * bars.length)
-        );
-        for (let i = 0; i < bars.length; i++) {
-          bars[i].classList.toggle("wave-bar-active", i === idx);
-        }
-      }
-      wavePlayheadRaf.current = requestAnimationFrame(playheadTick);
-    };
-    wavePlayheadRaf.current = requestAnimationFrame(playheadTick);
-    setWavePlaying(true);
-  };
-
-  // Decode audio segera setelah video dipilih → indikator waveform meyakinkan
-  // pengguna bahwa track audio benar-benar terbaca (bukan hanya ada track).
-  useEffect(() => {
-    if (!videoUrl || hasAudio !== true) {
-      setAudioStatus("idle");
-      setWaveform(null);
-      setWaveStats(null);
-      return;
-    }
-    let cancelled = false;
-    setAudioStatus("decoding");
-    void ensureAudioBuffer().then((buf) => {
-      if (cancelled) return;
-      if (buf) {
-        const peaks = computePeaks(buf);
-        setWaveform(peaks);
-        setWaveStats(
-          computeWaveStats(peaks, buf.duration, buf.numberOfChannels)
-        );
-        setAudioStatus("ready");
-      } else {
-        setWaveform(null);
-        setWaveStats(null);
-        setAudioStatus("failed");
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [videoUrl, hasAudio]);
-
-  // Cache rect bar SVG saat waveform berubah → loop playhead tidak perlu
-  // querySelectorAll tiap frame (160 node × 60 fps tetap murah, tapi cache
-  // membuat loop lebih ringan).
-  useEffect(() => {
-    if (waveSvgRef.current) {
-      waveBarsRef.current = Array.from(
-        waveSvgRef.current.querySelectorAll<SVGRectElement>(".wave-bar")
-      );
-    }
-  }, [waveform]);
 
   const mp4Supported =
     typeof MediaRecorder !== "undefined" &&
@@ -496,11 +263,7 @@ export default function VideoFaceEnhancePage() {
       // Video baru → audio buffer/promise lama TIDAK berlaku (jangan diputar
       // ulang untuk video lain) — indikator waveform ikut di-reset dan akan
       // di-decode ulang oleh efek [videoUrl, hasAudio].
-      stopWaveAudio();
-      audioSharedRef.current = createSharedAudioState();
-      setWaveform(null);
-      setWaveStats(null);
-      setAudioStatus("idle");
+      wave.resetAudioForNewVideo();
       setVideoUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev);
         return url;
@@ -573,15 +336,15 @@ export default function VideoFaceEnhancePage() {
     // Context dibuat/resume DALAM gestur klik. Audio sumber di-decode sekali
     // menjadi AudioBuffer lalu diputar ulang via BufferSource saat rekam —
     // output tidak senyap, tanpa memutar elemen video (hindari taint canvas).
-    if (hasAudio && !audioCtxRef.current) {
-      audioCtxRef.current = makeAudioContext();
+    if (hasAudio && !wave.audioCtxRef.current) {
+      wave.audioCtxRef.current = makeAudioContext();
     }
-    void audioCtxRef.current?.resume();
+    void wave.audioCtxRef.current?.resume();
     // Audio sumber (di-cache): biasanya sudah ter-decode oleh indikator
     // waveform segera setelah upload; di sini hanya menunggu promise yang sama.
-    let audioBuffer: AudioBuffer | null = audioSharedRef.current.buffer;
+    let audioBuffer: AudioBuffer | null = wave.audioSharedRef.current.buffer;
     if (hasAudio && !audioBuffer) {
-      audioBuffer = await ensureAudioBuffer();
+      audioBuffer = await wave.ensureAudioBuffer();
     }
     /** Buat perekam canvas + audio (helper bersama recordWithAudio). */
     const startRecorder = (): AudioRecorder => {
@@ -590,8 +353,8 @@ export default function VideoFaceEnhancePage() {
         fps: params.fps,
         mimeType: mime,
         audio:
-          audioCtxRef.current && audioBuffer
-            ? { context: audioCtxRef.current, buffer: audioBuffer }
+          wave.audioCtxRef.current && audioBuffer
+            ? { context: wave.audioCtxRef.current, buffer: audioBuffer }
             : null,
       });
       recorderRef.current = rec.recorder;
@@ -810,98 +573,10 @@ export default function VideoFaceEnhancePage() {
     cancelledRef.current = true;
   };
 
-  /** Hentikan loop sinkronisasi pemutaran banding (rAF). */
-  function stopSyncLoop() {
-    if (syncLoopRef.current !== null) {
-      cancelAnimationFrame(syncLoopRef.current);
-      syncLoopRef.current = null;
-    }
-  }
-
-  /** Jeda kedua pemutar banding dan hentikan loop sinkronisasi. */
-  function stopBoth() {
-    stopSyncLoop();
-    try {
-      srcVideoRef.current?.pause();
-      resultVideoRef.current?.pause();
-    } catch {
-      // abaikan
-    }
-  }
-
-  /**
-   * Putar video sumber & hasil BERSAMAAN dari 0 (perbandingan audio/video A/B
-   * yang sinkron). Dipicu gestur klik → autoplay dengan suara diizinkan
-   * browser. Selama berjalan, loop rAF menjaga kedua pemutar sejajar (drift
-   * > 0,12 dtk di-seek ulang, master = sumber); bila salah satu jeda/berakhir,
-   * keduanya berhenti.
-   */
-  function playBothSync() {
-    const src = srcVideoRef.current;
-    const res = resultVideoRef.current;
-    if (!src || !res) return;
-    stopSyncLoop();
-    try {
-      src.currentTime = 0;
-      res.currentTime = 0;
-    } catch {
-      // abaikan
-    }
-    if (srcTimeRef.current) srcTimeRef.current.textContent = "0:00:00.0";
-    if (resTimeRef.current) resTimeRef.current.textContent = "0:00:00.0";
-    void Promise.allSettled([src.play(), res.play()]);
-    const tick = () => {
-      if (!src || !res) return;
-      // Keduanya berhenti (pengguna menguasai pemutaran) → lepas sinkronisasi.
-      if (src.paused && res.paused) {
-        stopSyncLoop();
-        return;
-      }
-      // Salah satu dijeda → jeda pasangannya agar tetap sinkron.
-      if (src.paused !== res.paused) {
-        if (src.paused) res.pause();
-        else src.pause();
-      }
-      if (!src.paused && !res.paused) {
-        const drift = src.currentTime - res.currentTime;
-        if (Math.abs(drift) > 0.12) {
-          res.currentTime = src.currentTime; // master = sumber
-        }
-      }
-      // Timecode sinkron di atas kedua video — diperbarui tiap frame agar
-      // terlihat sejajar (nilai sama) atau melenceng (nilai beda).
-      if (srcTimeRef.current) {
-        srcTimeRef.current.textContent = formatTimecode(src.currentTime);
-      }
-      if (resTimeRef.current) {
-        resTimeRef.current.textContent = formatTimecode(res.currentTime);
-      }
-      if (src.ended || res.ended) {
-        stopBoth();
-        return;
-      }
-      syncLoopRef.current = requestAnimationFrame(tick);
-    };
-    syncLoopRef.current = requestAnimationFrame(tick);
-  }
-
-  /** Tombol mute eksplisit: bisukan/suarakan kedua pemutar banding sekaligus. */
-  function toggleMute() {
-    const next = !compareMuted;
-    setCompareMuted(next);
-    if (srcVideoRef.current) srcVideoRef.current.muted = next;
-    if (resultVideoRef.current) resultVideoRef.current.muted = next;
-  }
-
-  // Timecode banding di-reset ke 0:00:00.0 saat hasil baru dibuat.
-  useEffect(() => {
-    if (srcTimeRef.current) srcTimeRef.current.textContent = "0:00:00.0";
-    if (resTimeRef.current) resTimeRef.current.textContent = "0:00:00.0";
-  }, [resultUrl]);
 
   /** Ambil frame video hasil saat ini (posisi pemutaran pengguna) → data URL. */
   const captureResultFrame = (): Promise<string> => {
-    const v = resultVideoRef.current;
+    const v = sync.resVideoRef.current;
     if (!v) return Promise.reject(new Error("Video hasil belum siap."));
     if (v.videoWidth === 0 || v.videoHeight === 0) {
       return Promise.reject(
@@ -1037,49 +712,49 @@ export default function VideoFaceEnhancePage() {
                 </span>
                 {hasAudio === true && (
                   <span className="audio-wave">
-                    {audioStatus === "decoding" ? (
+                    {wave.audioStatus === "decoding" ? (
                       <span className="wave-note">⏳ membaca audio…</span>
-                    ) : audioStatus === "failed" ? (
+                    ) : wave.audioStatus === "failed" ? (
                       <span
                         className="wave-note wave-fail"
                         title="Track audio ada, tapi gagal di-decode (format tak didukung atau terlalu besar) — hasil akan direkam tanpa suara."
                       >
                         ⚠️ audio tak terbaca
                       </span>
-                    ) : waveform ? (
+                    ) : wave.waveform ? (
                       <span
                         className="wave-wrap"
-                        data-tip={formatWaveTip(waveStats)}
+                        data-tip={formatWaveTip(wave.waveStats)}
                       >
                       <svg
-                        ref={waveSvgRef}
-                        className={wavePlaying ? "waveform playing" : "waveform"}
+                        ref={wave.waveSvgRef}
+                        className={wave.wavePlaying ? "waveform playing" : "waveform"}
                         width={160}
                         height={24}
                         viewBox="0 0 160 24"
                         role="button"
                         tabIndex={0}
                         aria-label={
-                          wavePlaying
+                          wave.wavePlaying
                             ? "Jeda audio sumber (klik untuk menghentikan)"
                             : "Putar audio sumber (klik untuk memutar, cek cepat)"
                         }
-                        aria-pressed={wavePlaying}
-                        onClick={toggleWaveAudio}
+                        aria-pressed={wave.wavePlaying}
+                        onClick={wave.toggleWaveAudio}
                         onKeyDown={(e) => {
                           if (e.key === "Enter" || e.key === " ") {
                             e.preventDefault();
-                            toggleWaveAudio();
+                            wave.toggleWaveAudio();
                           }
                         }}
                       >
                         <title>
-                          {wavePlaying
+                          {wave.wavePlaying
                             ? "Memutar audio sumber — klik untuk menghentikan"
                             : "Klik untuk memutar audio sumber (cek cepat)"}
-                          {waveStats ? ` — ${formatWaveTip(waveStats)}` : ""}
+                          {wave.waveStats ? ` — ${formatWaveTip(wave.waveStats)}` : ""}
                         </title>
-                        {Array.from(waveform, (p, i) => {
+                        {Array.from(wave.waveform, (p, i) => {
                           const h = Math.max(1, Math.round(p * 20));
                           const y = (24 - h) / 2;
                           return (
@@ -1115,11 +790,7 @@ export default function VideoFaceEnhancePage() {
                   setProgress(null);
                   setError("");
                   setHasAudio(null);
-                  stopWaveAudio();
-                  audioSharedRef.current = createSharedAudioState();
-                  setWaveform(null);
-                  setWaveStats(null);
-                  setAudioStatus("idle");
+                  wave.resetAudioForNewVideo();
                 }}
               >
                 🔄 Video Lain
@@ -1372,20 +1043,20 @@ export default function VideoFaceEnhancePage() {
                 <figure>
                   <figcaption>
                     Sebelum (video asli)
-                    <span className="compare-time" ref={srcTimeRef}>
+                    <span className="compare-time" ref={sync.srcTimeRef}>
                       0:00:00.0
                     </span>
                   </figcaption>
                   <video
-                    ref={srcVideoRef}
+                    ref={sync.srcVideoRef}
                     src={videoUrl}
                     controls
-                    muted={compareMuted}
+                    muted={sync.compareMuted}
                     className="bg-preview-img"
                     onTimeUpdate={() => {
-                      if (srcTimeRef.current) {
-                        srcTimeRef.current.textContent = formatTimecode(
-                          srcVideoRef.current?.currentTime ?? 0
+                      if (sync.srcTimeRef.current) {
+                        sync.srcTimeRef.current.textContent = formatTimecode(
+                          sync.srcVideoRef.current?.currentTime ?? 0
                         );
                       }
                     }}
@@ -1394,20 +1065,20 @@ export default function VideoFaceEnhancePage() {
                 <figure>
                   <figcaption>
                     Sesudah (face restored)
-                    <span className="compare-time" ref={resTimeRef}>
+                    <span className="compare-time" ref={sync.resTimeRef}>
                       0:00:00.0
                     </span>
                   </figcaption>
                   <video
-                    ref={resultVideoRef}
+                    ref={sync.resVideoRef}
                     src={resultUrl}
                     controls
-                    muted={compareMuted}
+                    muted={sync.compareMuted}
                     className="bg-preview-img"
                     onTimeUpdate={() => {
-                      if (resTimeRef.current) {
-                        resTimeRef.current.textContent = formatTimecode(
-                          resultVideoRef.current?.currentTime ?? 0
+                      if (sync.resTimeRef.current) {
+                        sync.resTimeRef.current.textContent = formatTimecode(
+                          sync.resVideoRef.current?.currentTime ?? 0
                         );
                       }
                     }}
@@ -1418,15 +1089,15 @@ export default function VideoFaceEnhancePage() {
                 <button
                   type="button"
                   className="btn btn-primary"
-                  onClick={playBothSync}
+                  onClick={sync.playBothSync}
                   title="Putar video asli & hasil bersamaan dari awal, disinkronkan (perbandingan audio/video A/B)"
                 >
                   ▶️ Putar Keduanya (Sinkron)
                 </button>
-                <button type="button" className="btn" onClick={toggleMute}>
-                  {compareMuted ? "🔇 Suarakan" : "🔊 Bisukan"}
+                <button type="button" className="btn" onClick={sync.toggleMute}>
+                  {sync.compareMuted ? "🔇 Suarakan" : "🔊 Bisukan"}
                 </button>
-                <button type="button" className="btn" onClick={stopBoth}>
+                <button type="button" className="btn" onClick={sync.stopBoth}>
                   ⏹ Berhenti
                 </button>
               </div>
