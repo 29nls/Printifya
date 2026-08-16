@@ -10,6 +10,7 @@ import {
 import { setPendingPasFoto } from "../../shared/pasFotoBridge";
 import { setPendingLayoutPhoto } from "../../shared/autoLayoutBridge";
 import {
+  computePeaks,
   countFrames,
   DEFAULT_VIDEO_PARAMS,
   FPS_OPTIONS,
@@ -67,8 +68,8 @@ function seekTo(video: HTMLVideoElement, t: number): Promise<void> {
 }
 
 /**
- * Buat AudioContext (dengan fallback webkit). Dipakai untuk decode audio
- * sumber menjadi AudioBuffer dan memutar ulang saat rekaman.
+ * Buat AudioContext (dengan fallback webkit). Dipakai untuk memutar ulang
+ * audio saat rekaman (dibuat/resume DALAM gestur klik).
  */
 function makeAudioContext(): AudioContext | null {
   try {
@@ -79,6 +80,35 @@ function makeAudioContext(): AudioContext | null {
     return Ctor ? new Ctor() : null;
   } catch {
     return null;
+  }
+}
+
+/** Batas memori wajar untuk AudioBuffer (float32 × kanal × sampel) — video
+ *  ultra-panjang direkam tanpa audio daripada memakai ratusan MB RAM. */
+const MAX_AUDIO_BYTES = 100 * 1024 * 1024;
+
+/**
+ * Decode audio menjadi AudioBuffer via OfflineAudioContext — bukan context
+ * playback: tidak perlu resume/gestur, tanpa warning autoplay, dan bisa
+ * dipanggil segera setelah video dipilih (untuk indikator waveform). Hasil
+ * AudioBuffer bersifat independen dari context dan bisa diputar ulang oleh
+ * context playback mana pun. `null` bila tak didukung / decode gagal.
+ */
+function decodeAudioBuffer(arrayBuf: ArrayBuffer): Promise<AudioBuffer | null> {
+  const Ctor =
+    window.OfflineAudioContext ??
+    (window as unknown as {
+      webkitOfflineAudioContext?: typeof OfflineAudioContext;
+    }).webkitOfflineAudioContext;
+  if (!Ctor) return Promise.resolve(null);
+  try {
+    const ctx = new Ctor(1, 1, 44100);
+    return ctx
+      .decodeAudioData(arrayBuf.slice(0))
+      .then((b) => b as AudioBuffer)
+      .catch(() => null);
+  } catch {
+    return Promise.resolve(null);
   }
 }
 
@@ -105,6 +135,12 @@ export default function VideoFaceEnhancePage() {
   const [faceFrames, setFaceFrames] = useState(0);
   // null = belum diketahui, true/false = video sumber punya/tanpa audio.
   const [hasAudio, setHasAudio] = useState<boolean | null>(null);
+  // Status decode audio untuk indikator waveform: idle/decoding/ready/failed.
+  const [audioStatus, setAudioStatus] = useState<
+    "idle" | "decoding" | "ready" | "failed"
+  >("idle");
+  // Puncak waveform audio sumber (0..1 per bucket) — SVG mini di samping badge.
+  const [waveform, setWaveform] = useState<Float32Array | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileTokenRef = useRef(0);
@@ -118,6 +154,9 @@ export default function VideoFaceEnhancePage() {
   // drawImage berikutnya men-taint canvas (perilaku Chromium).
   const audioCtxRef = useRef<AudioContext | null>(null);
   const audioBufferRef = useRef<AudioBuffer | null>(null);
+  // Promise decode per video (di-cache agar tidak decode ganda; di-reset saat
+  // video berganti).
+  const audioPromiseRef = useRef<Promise<AudioBuffer | null> | null>(null);
   const navigate = useNavigate();
 
   // Persist semua opsi + awalan setiap berubah.
@@ -149,11 +188,70 @@ export default function VideoFaceEnhancePage() {
         audioCtxRef.current = null;
         audioBufferRef.current = null;
       }
+      audioPromiseRef.current = null;
       const { videoUrl: vUrl, resultUrl: rUrl } = urlsRef.current;
       if (vUrl) URL.revokeObjectURL(vUrl);
       if (rUrl) URL.revokeObjectURL(rUrl);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /**
+   * Pastikan AudioBuffer sumber ter-decode (sekali per video; hasil di-cache).
+   * Dipakai indikator waveform (segera setelah upload) dan `run()` (saat
+   * rekaman) — keduanya berbagi promise yang sama, jadi tidak ada decode ganda
+   * atau race. `null` bila tanpa audio / decode gagal / terlalu besar.
+   */
+  const ensureAudioBuffer = (): Promise<AudioBuffer | null> => {
+    if (audioBufferRef.current) return Promise.resolve(audioBufferRef.current);
+    if (!audioPromiseRef.current) {
+      audioPromiseRef.current = (async () => {
+        if (!videoUrl) return null;
+        try {
+          const raw = await (await fetch(videoUrl)).arrayBuffer();
+          const decoded = await decodeAudioBuffer(raw);
+          const bytes =
+            decoded !== null
+              ? decoded.length *
+                decoded.numberOfChannels *
+                Float32Array.BYTES_PER_ELEMENT
+              : Infinity;
+          const buf = bytes <= MAX_AUDIO_BYTES ? decoded : null;
+          audioBufferRef.current = buf;
+          return buf;
+        } catch {
+          return null;
+        }
+      })();
+    }
+    return audioPromiseRef.current;
+  };
+
+  // Decode audio segera setelah video dipilih → indikator waveform meyakinkan
+  // pengguna bahwa track audio benar-benar terbaca (bukan hanya ada track).
+  useEffect(() => {
+    if (!videoUrl || hasAudio !== true) {
+      setAudioStatus("idle");
+      setWaveform(null);
+      return;
+    }
+    let cancelled = false;
+    setAudioStatus("decoding");
+    void ensureAudioBuffer().then((buf) => {
+      if (cancelled) return;
+      if (buf) {
+        setWaveform(computePeaks(buf));
+        setAudioStatus("ready");
+      } else {
+        setWaveform(null);
+        setAudioStatus("failed");
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoUrl, hasAudio]);
 
   const mp4Supported =
     typeof MediaRecorder !== "undefined" &&
@@ -234,6 +332,13 @@ export default function VideoFaceEnhancePage() {
       }
       setHasAudio(hasAudioTrack);
       setMeta({ w: video.videoWidth, h: video.videoHeight, duration });
+      // Video baru → audio buffer/promise lama TIDAK berlaku (jangan diputar
+      // ulang untuk video lain) — indikator waveform ikut di-reset dan akan
+      // di-decode ulang oleh efek [videoUrl, hasAudio].
+      audioBufferRef.current = null;
+      audioPromiseRef.current = null;
+      setWaveform(null);
+      setAudioStatus("idle");
       setVideoUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev);
         return url;
@@ -304,22 +409,11 @@ export default function VideoFaceEnhancePage() {
       audioCtxRef.current = makeAudioContext();
     }
     void audioCtxRef.current?.resume();
-    // Decode audio sumber (sekali; hasil di-cache lintas run).
+    // Audio sumber (di-cache): biasanya sudah ter-decode oleh indikator
+    // waveform segera setelah upload; di sini hanya menunggu promise yang sama.
     let audioBuffer: AudioBuffer | null = audioBufferRef.current;
-    if (hasAudio && !audioBuffer && audioCtxRef.current && videoUrl) {
-      try {
-        const raw = await (await fetch(videoUrl)).arrayBuffer();
-        const decoded = await audioCtxRef.current.decodeAudioData(raw.slice(0));
-        // Batas memori wajar (float32 × kanal × sampel) — video ultra-panjang
-        // direkam tanpa audio daripada memakai ratusan MB RAM.
-        const bytes =
-          decoded.length * decoded.numberOfChannels * Float32Array.BYTES_PER_ELEMENT;
-        audioBuffer = bytes <= 100 * 1024 * 1024 ? decoded : null;
-        audioBufferRef.current = audioBuffer;
-      } catch {
-        // decode gagal (format tak didukung) — rekam tanpa audio
-        audioBuffer = null;
-      }
+    if (hasAudio && !audioBuffer) {
+      audioBuffer = await ensureAudioBuffer();
     }
     const makeRecorder = (audioTracks: MediaStreamTrack[]) => {
       const canvasStream = (canvas as HTMLCanvasElement & {
@@ -667,7 +761,7 @@ export default function VideoFaceEnhancePage() {
         <>
           <section className="panel">
             <div className="file-row">
-              <span>
+              <span className="file-title">
                 🎬 Video: <strong>{fileName}</strong>
                 <span className="dims">
                   {" "}
@@ -678,6 +772,48 @@ export default function VideoFaceEnhancePage() {
                       ? " 🔇 tanpa audio"
                       : ""}
                 </span>
+                {hasAudio === true && (
+                  <span className="audio-wave">
+                    {audioStatus === "decoding" ? (
+                      <span className="wave-note">⏳ membaca audio…</span>
+                    ) : audioStatus === "failed" ? (
+                      <span
+                        className="wave-note wave-fail"
+                        title="Track audio ada, tapi gagal di-decode (format tak didukung atau terlalu besar) — hasil akan direkam tanpa suara."
+                      >
+                        ⚠️ audio tak terbaca
+                      </span>
+                    ) : waveform ? (
+                      <svg
+                        className="waveform"
+                        width={160}
+                        height={24}
+                        viewBox="0 0 160 24"
+                        role="img"
+                        aria-label="Bentuk gelombang audio sumber (AudioBuffer ter-decode)"
+                      >
+                        <title>
+                          Audio sumber ter-decode — akan diputar ulang saat
+                          rekaman
+                        </title>
+                        {Array.from(waveform, (p, i) => {
+                          const h = Math.max(1, Math.round(p * 20));
+                          const y = (24 - h) / 2;
+                          return (
+                            <rect
+                              key={i}
+                              x={i}
+                              y={y}
+                              width={1}
+                              height={h}
+                              className="wave-bar"
+                            />
+                          );
+                        })}
+                      </svg>
+                    ) : null}
+                  </span>
+                )}
               </span>
               <button
                 type="button"
@@ -695,6 +831,10 @@ export default function VideoFaceEnhancePage() {
                   setProgress(null);
                   setError("");
                   setHasAudio(null);
+                  audioBufferRef.current = null;
+                  audioPromiseRef.current = null;
+                  setWaveform(null);
+                  setAudioStatus("idle");
                 }}
               >
                 🔄 Video Lain
@@ -872,12 +1012,15 @@ export default function VideoFaceEnhancePage() {
               untuk perilaku paling dekat dengan repo asli; 720 px/Asli
               menghasilkan video lebih tajam tapi lebih lambat. Frame yang
               diproses = durasi × FPS; turunkan FPS untuk video panjang. Durasi
-              hasil ≈ durasi sumber (frame diproses dulu, lalu direkam ulang
-              pada jadwal FPS); untuk video sangat panjang perekaman berjalan
-              langsung dan durasi bisa sedikit lebih panjang. Track audio sumber
-              dipertahankan: audio di-decode sekali menjadi AudioBuffer lalu
-              diputar ulang via WebAudio → MediaStreamDestination saat rekam —
-              output tidak senyap bila video sumber punya suara.
+              hasil ≈ durasi sumber (frame diproses
+              dulu, lalu direkam ulang pada jadwal FPS); untuk video sangat
+              panjang perekaman berjalan langsung dan durasi bisa sedikit lebih
+              panjang. Track audio sumber dipertahankan: audio di-decode sekali
+              menjadi AudioBuffer lalu diputar ulang via WebAudio →
+              MediaStreamDestination saat rekam — output tidak senyap bila video
+              sumber punya suara. Mini waveform di samping badge 🔊 menunjukkan
+              audio benar-benar terbaca (hasil decode); bila muncul "⚠️ audio tak
+              terbaca", hasil direkam tanpa suara.
             </p>
           </section>
 

@@ -75,6 +75,35 @@ export function countFrames(durationSec: number, fps: number): number {
   return Math.max(1, Math.round(durationSec * fps));
 }
 
+/**
+ * Hitung puncak absolut gabungan kanal per bucket (0..1) dari AudioBuffer —
+ * data untuk mini waveform indikator audio sumber. `buckets` = jumlah batang
+ * waveform (default 160). Buffer kosong → semua nol; buffer yang lebih pendek
+ * dari buckets tetap aman (tiap bucket minimal 1 sampel).
+ */
+export function computePeaks(buffer: AudioBuffer, buckets = 160): Float32Array {
+  const ch0 = buffer.getChannelData(0);
+  const ch1 = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : null;
+  const n = ch0.length;
+  const peaks = new Float32Array(buckets);
+  if (n === 0 || buckets <= 0) return peaks;
+  for (let b = 0; b < buckets; b++) {
+    const start = Math.floor((b * n) / buckets);
+    const end = Math.max(start + 1, Math.floor(((b + 1) * n) / buckets));
+    let peak = 0;
+    for (let i = start; i < end; i++) {
+      const v = Math.abs(ch0[i]);
+      if (v > peak) peak = v;
+      if (ch1) {
+        const v2 = Math.abs(ch1[i]);
+        if (v2 > peak) peak = v2;
+      }
+    }
+    peaks[b] = peak;
+  }
+  return peaks;
+}
+
 const clamp255 = (v: number) => Math.min(255, Math.max(0, v));
 
 /**

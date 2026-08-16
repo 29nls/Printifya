@@ -181,7 +181,7 @@ dan restorasi wajah video gaya PGTFormer.
 | **Pemulihan wajah** (pemulusan kulit + koreksi warna + ketajaman di kotak wajah) | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ (tiap frame) |
 | **Slider fidelitas `w`** (kekuatan pemulihan vs identitas — CodeFormer) | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
 | **Pemulihan warna** foto pudar/hitam-putih + perbaikan latar (background enhancement) | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
-| **Restorasi wajah video** (per frame, durasi hasil ≈ sumber, ekspor WebM/MP4, **track audio sumber dipertahankan** via WebAudio) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| **Restorasi wajah video** (per frame, durasi hasil ≈ sumber, ekspor WebM/MP4, **track audio sumber dipertahankan** via WebAudio + **indikator mini waveform** audio terbaca) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
 | **Koherensi temporal** (PGTFormer: blend hasil dengan frame sebelumnya, tanpa pre-alignment) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
 | FPS output & resolusi kerja (512 PGTFormer / 720 / asli) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
 | Slider manual + perbandingan sebelum/sesudah | ❌ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ (video asli vs hasil) |
@@ -317,8 +317,14 @@ dan restorasi wajah video gaya PGTFormer.
   (perilaku Chromium bila elemen video diputar lewat WebAudio). Output tidak senyap bila
   video sumber punya suara; bila decode gagal, buffer melebihi batas memori (~100 MB), atau
   muxing audio+video tak didukung (mis. MP4 tertentu), fallback otomatis ke rekaman video saja. Frame video hasil bisa diteruskan ke Pas Foto 3×4 / Auto Layout (prefix
-  `video-`). Bagian murni (`pickWorkingSize`/`countFrames`/`temporalBlend`) terpisah dari
-  orkestrasi agar bisa diuji tanpa DOM/video.
+  `video-`). **Indikator mini waveform**: audio di-decode segera setelah upload via
+  `OfflineAudioContext` (tanpa gestur/warning autoplay, hasil di-cache dan dipakai ulang
+  oleh `run()`) lalu `computePeaks` (puncak gabungan kanal per bucket) digambar sebagai SVG
+  kecil di samping badge, memberikan bukti visual audio benar-benar terbaca; decode gagal
+  menampilkan peringatan "audio tak terbaca". Cache audio di-reset saat video berganti
+  (buffer video lama tidak pernah diputar untuk video baru). Bagian murni
+  (`pickWorkingSize`/`countFrames`/`temporalBlend`/`computePeaks`) terpisah dari orkestrasi
+  agar bisa diuji tanpa DOM/video.
 - **Edit Auto Layout**: foto bisa di-drag untuk mengatur ulang urutan — antar sel di lembar
   maupun thumbnail di strip (keduanya memakai array foto yang sama, jadi pratinjau, label,
   PDF, dan cetak ikut urutan baru). Bingkai photobox berasal dari

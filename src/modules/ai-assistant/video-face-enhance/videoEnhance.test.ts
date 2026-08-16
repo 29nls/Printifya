@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  computePeaks,
   countFrames,
   DEFAULT_VIDEO_PARAMS,
   pickWorkingSize,
@@ -135,5 +136,65 @@ describe("DEFAULT_VIDEO_PARAMS — default yang masuk akal", () => {
     expect(DEFAULT_VIDEO_PARAMS.temporal).toBeLessThanOrEqual(100);
     expect([10, 15, 24, 30]).toContain(DEFAULT_VIDEO_PARAMS.fps);
     expect(["512", "720", "orig"]).toContain(DEFAULT_VIDEO_PARAMS.resMode);
+  });
+});
+
+describe("computePeaks — data mini waveform dari AudioBuffer", () => {
+  /** AudioBuffer palsu: kanal Float32Array langsung (kontrak getChannelData). */
+  function fakeBuffer(
+    channels: Float32Array[],
+    sampleRate = 44100
+  ): AudioBuffer {
+    return {
+      numberOfChannels: channels.length,
+      length: channels[0]?.length ?? 0,
+      sampleRate,
+      getChannelData: (c: number) => channels[c] ?? new Float32Array(0),
+    } as unknown as AudioBuffer;
+  }
+
+  it("buffer diam (nol) → semua puncak 0", () => {
+    const b = fakeBuffer([new Float32Array(1000)]);
+    const peaks = computePeaks(b, 10);
+    expect(peaks.length).toBe(10);
+    for (const p of peaks) expect(p).toBe(0);
+  });
+
+  it("amplitudo konstan 0.5 → tiap bucket ≈ 0.5", () => {
+    const b = fakeBuffer([new Float32Array(1000).fill(0.5)]);
+    const peaks = computePeaks(b, 8);
+    for (const p of peaks) expect(p).toBeCloseTo(0.5, 5);
+  });
+
+  it("stereo mengambil puncak gabungan kedua kanal", () => {
+    // Kanal kiri senyap, kanal kanan 0.8 → puncak 0.8.
+    const b = fakeBuffer([new Float32Array(1000), new Float32Array(1000).fill(0.8)]);
+    const peaks = computePeaks(b, 4);
+    for (const p of peaks) expect(p).toBeCloseTo(0.8, 5);
+  });
+
+  it("puncak lokal tersimpan (bukan rata-rata) dan jumlah bucket sesuai", () => {
+    // Satu ledakan di tengah buffer (0.9), sisanya senyap → hanya bucket
+    // tengah yang tinggi; bucket lain mendekati 0.
+    const d = new Float32Array(400);
+    d[199] = 0.9;
+    const b = fakeBuffer([d]);
+    const peaks = computePeaks(b, 4);
+    // Bucket 0: sampel 0..99 (senyap); bucket 2: sampel 200..299 (senyap).
+    expect(peaks[0]).toBe(0);
+    expect(peaks[2]).toBe(0);
+    // Ledakan di sampel 199 → bucket 1 (100..199).
+    expect(peaks[1]).toBeCloseTo(0.9, 5);
+  });
+
+  it("buffer kosong → nol; bucket ≤ 0 → array kosong", () => {
+    const empty = fakeBuffer([new Float32Array(0)]);
+    expect([...computePeaks(empty, 5)]).toEqual([0, 0, 0, 0, 0]);
+    expect(computePeaks(fakeBuffer([new Float32Array(100)]), 0).length).toBe(0);
+  });
+
+  it("default 160 bucket", () => {
+    const b = fakeBuffer([new Float32Array(1000).fill(0.3)]);
+    expect(computePeaks(b).length).toBe(160);
   });
 });

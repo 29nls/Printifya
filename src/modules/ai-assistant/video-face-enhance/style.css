@@ -31,6 +31,42 @@
   width: 170px;
 }
 
+/* Indikator waveform audio sumber (mini SVG di samping badge 🔊). */
+.file-title {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.audio-wave {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+}
+
+.waveform {
+  display: block;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1px 2px;
+}
+
+.wave-bar {
+  fill: var(--accent);
+}
+
+.wave-note {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.wave-fail {
+  color: #92400e;
+}
+
 /* Bar kemajuan pemrosesan frame. */
 .vfe-progress {
   margin-top: 12px;
