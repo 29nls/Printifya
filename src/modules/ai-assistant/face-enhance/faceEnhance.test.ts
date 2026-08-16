@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  applyFaceEnhance,
   computeFaceBox,
   computeStretch,
   enhanceFace,
@@ -174,6 +175,91 @@ describe("enhancePixels — pipeline murni", () => {
       expect(out[i + 3]).toBe(src[i + 3]);
     }
     expect(changed).toBeGreaterThan(0);
+  });
+});
+
+describe("applyFaceEnhance — inti pipeline murni (dipakai worker & thread utama)", () => {
+  const W = 32;
+  const H = 32;
+
+  function stepImage(): Uint8ClampedArray {
+    const data = new Uint8ClampedArray(W * H * 4);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const i = (y * W + x) * 4;
+        data[i] = x < 15 ? 200 : 100;
+        data[i + 1] = 160;
+        data[i + 2] = 120;
+        data[i + 3] = 255;
+      }
+    }
+    return data;
+  }
+
+  const neutral = (): FaceEnhanceParams => ({
+    ...NEUTRAL_PARAMS,
+    fidelity: 100,
+    smooth: 0,
+    sharpen: 0,
+    color: 0,
+    background: false,
+    restoreColor: false,
+  });
+
+  const FACE = { x: 0.3, y: 0.3, w: 0.2, h: 0.2, area: 1 };
+
+  it("param netral = identitas byte-ke-byte (computeStretch tanpa efek)", () => {
+    const src = stepImage();
+    expect(applyFaceEnhance(src, W, H, FACE, neutral())).toEqual(src);
+  });
+
+  it("ekuivalen dengan komposisi manual computeFaceBox + computeStretch + enhancePixels", () => {
+    const src = stepImage();
+    const params = {
+      ...neutral(),
+      fidelity: 0,
+      smooth: 100,
+      sharpen: 30,
+      color: 50,
+    };
+    const out = applyFaceEnhance(src, W, H, FACE, params);
+    const box = computeFaceBox(FACE, W, H)!;
+    const stretch = computeStretch(src, W, box);
+    const manual = enhancePixels(src, W, H, box, params, stretch);
+    expect(out).toEqual(manual);
+    // Alpha dipertahankan.
+    for (let i = 3; i < out.length; i += 4) expect(out[i]).toBe(src[i]);
+  });
+
+  it("tanpa wajah (null): koreksi global lembut tanpa throw, alpha dipertahankan", () => {
+    const src = stepImage();
+    const out = applyFaceEnhance(src, W, H, null, {
+      ...neutral(),
+      fidelity: 0,
+      smooth: 50,
+      sharpen: 40,
+      color: 70,
+      background: true,
+    });
+    let changed = 0;
+    for (let i = 0; i < src.length; i += 4) {
+      if (out[i] !== src[i] || out[i + 1] !== src[i + 1] || out[i + 2] !== src[i + 2]) {
+        changed++;
+      }
+      expect(out[i + 3]).toBe(src[i + 3]);
+    }
+    expect(changed).toBeGreaterThan(0);
+  });
+
+  it("input tidak diubah (buffer baru dikembalikan)", () => {
+    const src = stepImage();
+    const copy = new Uint8ClampedArray(src);
+    applyFaceEnhance(src, W, H, FACE, {
+      ...neutral(),
+      fidelity: 0,
+      smooth: 100,
+    });
+    expect(src).toEqual(copy);
   });
 });
 

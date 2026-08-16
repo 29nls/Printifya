@@ -316,6 +316,29 @@ export function enhancePixels(
 
 type ImageSource = HTMLImageElement | HTMLCanvasElement;
 
+/**
+ * Inti pipeline restore pada piksel mentah (tanpa DOM): kotak wajah →
+ * bentangan histogram → `enhancePixels`. SUMBER TUNGGAL logika restore —
+ * dipakai `enhanceFace` (thread utama: pratinjau & fallback) DAN Web Worker
+ * full-res (`faceEnhance.worker.ts`), jadi kedua jalur menghasilkan piksel
+ * identik. `face` ternormalisasi 0..1 (null → koreksi global lembut).
+ */
+export function applyFaceEnhance(
+  data: Uint8ClampedArray,
+  w: number,
+  h: number,
+  face: FaceRegion | null,
+  params: FaceEnhanceParams
+): Uint8ClampedArray {
+  const box = computeFaceBox(face, w, h);
+  const stretch = computeStretch(
+    data,
+    w,
+    box ?? { x0: 0, y0: 0, x1: w, y1: h }
+  );
+  return enhancePixels(data, w, h, box, params, stretch);
+}
+
 function sourceSize(source: ImageSource): [number, number] {
   return source instanceof HTMLImageElement
     ? [source.naturalWidth, source.naturalHeight]
@@ -352,9 +375,7 @@ export function enhanceFace(
   const img = ctx.getImageData(0, 0, w, h);
 
   const face = detectFace(source);
-  const box = computeFaceBox(face, w, h);
-  const stretch = computeStretch(img.data, w, box ?? { x0: 0, y0: 0, x1: w, y1: h });
-  const out = enhancePixels(img.data, w, h, box, params, stretch);
+  const out = applyFaceEnhance(img.data, w, h, face, params);
 
   // Salinan eksplisit agar buffer ber-backing ArrayBuffer (bukan
   // ArrayBufferLike) — kontrak ImageData di lib DOM modern.

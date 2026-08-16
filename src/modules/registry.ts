@@ -251,7 +251,7 @@ export const MODULES: Module[] = [
         path: "/ai-assistant/face-enhance",
         icon: "👤",
         description:
-          "Pulihkan kualitas wajah (gaya CodeFormer): pemulusan kulit, koreksi warna & ketajaman pada area wajah dengan slider fidelitas w, perbaikan latar opsional, pulihkan warna foto lama, perbesaran 2×/4× SETELAH pemulihan (urutan CodeFormer → Real-ESRGAN) — perbandingan sebelum/sesudah, perbandingan kualitas vs Video Face Enhance pada frame yang sama (PSNR/diff), terusan ke pas foto & Auto Layout, preferensi tersimpan dengan tombol reset.",
+          "Pulihkan kualitas wajah (gaya CodeFormer): pemulusan kulit, koreksi warna & ketajaman pada area wajah dengan slider fidelitas w, perbaikan latar opsional, pulihkan warna foto lama, perbesaran 2×/4× SETELAH pemulihan (urutan CodeFormer → Real-ESRGAN) — perbandingan sebelum/sesudah, perbandingan kualitas vs Video Face Enhance pada frame yang sama (PSNR/diff), terusan ke pas foto & Auto Layout, preferensi tersimpan dengan tombol reset. Pipeline full-res (restore + perbesaran) berjalan di Web Worker (OffscreenCanvas, fallback thread utama) sehingga foto besar tidak membekukan UI — hasil piksel identik dengan jalur lama.",
         Component: FaceEnhancePage,
       },
       {

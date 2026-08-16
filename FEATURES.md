@@ -168,7 +168,7 @@ dan restorasi wajah video gaya PGTFormer.
 | Fitur | Auto Crop Face | Background Removal | Enhance Photo | Auto Layout | Upscale & Denoise | Face Enhance | Video Face Enhance |
 |---|---|---|---|---|---|---|---|
 | **Mesin** | `autocrop.ts` + `detectFace` | `bgRemove.ts` (skin-tone + flood fill) | histogram + slider | modul sendiri (grid A4) | `waifu2x.ts` (heuristik) | `faceEnhance.ts` (pemulihan wajah heuristik) | `videoEnhance.ts` (per-frame `faceEnhance` + koherensi temporal + MediaRecorder) |
-| **Pipeline Web Worker** (fallback thread utama bila tidak didukung) | ❌ | ❌ | ❌ | ❌ | ✅ (OffscreenCanvas) | ❌ | ✅ (per-frame, tanpa OffscreenCanvas) |
+| **Pipeline Web Worker** (fallback thread utama bila tidak didukung) | ❌ | ❌ | ❌ | ❌ | ✅ (OffscreenCanvas) | ✅ (full-res, OffscreenCanvas) | ✅ (per-frame, tanpa OffscreenCanvas) |
 | Upload | ✅ | ✅ | ✅ | ✅ (banyak foto) | ✅ (batch) | ✅ | ✅ (video) |
 | **Deteksi wajah otomatis** | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ (per frame) |
 | **Crop rasio pas foto** | ✅ (otomatis + edit manual fallback) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
@@ -250,7 +250,16 @@ dan restorasi wajah video gaya PGTFormer.
   terdeteksi → koreksi global lembut dengan catatan. Bagian murni
   (`computeFaceBox`/`computeStretch`/`enhancePixels`) terpisah dari pembungkus canvas agar
   bisa diuji tanpa DOM; pembungkus `enhanceFace` (termasuk urutan restore→upscale) diuji
-  dengan harness canvas mock.
+  dengan harness canvas mock. **Pipeline full-res berjalan di Web Worker**
+  (`faceEnhance.worker.ts` + `faceEnhanceWorkerApi.ts`, pola worker Upscale & Denoise):
+  `applyFaceEnhance` (kotak wajah → bentangan histogram → `enhancePixels`) adalah SUMBER
+  TUNGGAL logika restore yang dipakai jalur worker DAN jalur thread utama, jadi  hasil identik; kotak wajah dihitung di thread utama saat upload (`detectFace` — murah,
+  downscale ≤240 px) dan dikirim sebagai data; piksel masuk via transfer (tanpa salin),
+  `upscaleCanvas` memakai `setCanvasFactory(OffscreenCanvas)` di worker, dan hasil keluar
+  sebagai **Blob PNG** (`OffscreenCanvas.convertToBlob`) sehingga encode gambar besar
+  (hingga ~12000 px) juga tidak membekukan UI. Unduh PNG / Jadikan Pas Foto / Susun ke
+  Lembar A4 pada foto ≥2000 px tidak lagi membekukan UI: busy state + tombol nonaktif
+  selama proses, fallback sinkron `enhanceFace` bila browser tanpa Worker.
 - **Perbandingan kualitas Face vs Video Face Enhance** (`qualityCompare.ts`): tombol
   "Bandingkan pada frame ini" menjalankan kedua pipeline pada foto yang sama di resolusi
   kerja video (`pickWorkingSize` dari `resMode` tersimpan modul video — 512/720/asli,

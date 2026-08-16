@@ -9,6 +9,10 @@ import {
   NEUTRAL_PARAMS,
   type FaceEnhanceParams,
 } from "./faceEnhance";
+import type {
+  FaceEnhanceWorkerRequestNoId,
+  FaceEnhanceWorkerResponse,
+} from "./faceEnhanceWorkerApi";
 import {
   clearFaceEnhanceOptions,
   loadLayoutPrefix,
@@ -84,8 +88,76 @@ export default function FaceEnhancePage() {
     resMode: VideoEnhanceParams["resMode"];
     videoParams: VideoEnhanceParams;
   } | null>(null);
+  /** Operasi full-res yang sedang berjalan (busy state — UI tetap responsif
+   *  karena pipeline berjalan di Web Worker). */
+  const [busyOp, setBusyOp] = useState<
+    "download" | "pasfoto" | "layout" | null
+  >(null);
+  const busyRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+
+  // Web Worker pipeline full-res (restore wajah + perbesaran 2×/4×) — foto
+  // besar tidak membekukan UI; fallback thread utama bila browser tanpa Worker.
+  const useWorker = typeof Worker !== "undefined";
+  const faceWorkerRef = useRef<Worker | null>(null);
+  const faceWorkerSeqRef = useRef(0);
+  /** Penolak promise postFaceEnhanceWorker yang masih menunggu — ditolak saat
+   *  unmount (worker di-terminate) agar antrean tidak menggantung. */
+  const pendingFaceWorkerRef = useRef<Set<(e: Error) => void>>(new Set());
+
+  // Hentikan worker saat komponen dilepas: tolak permintaan tertunda, terminate.
+  useEffect(() => {
+    return () => {
+      pendingFaceWorkerRef.current.forEach((reject) =>
+        reject(new Error("Worker dihentikan."))
+      );
+      pendingFaceWorkerRef.current.clear();
+      faceWorkerRef.current?.terminate();
+      faceWorkerRef.current = null;
+    };
+  }, []);
+
+  const getFaceWorker = (): Worker => {
+    if (!faceWorkerRef.current) {
+      faceWorkerRef.current = new Worker(
+        new URL("./faceEnhance.worker.ts", import.meta.url),
+        { type: "module" }
+      );
+    }
+    return faceWorkerRef.current;
+  };
+
+  /** Kirim satu pekerjaan full-res ke worker; resolve saat balasan dengan id
+   *  cocok tiba. `pixels` (ArrayBuffer) selalu dikirim via transfer (tanpa
+   *  salin). */
+  const postFaceEnhanceWorker = (
+    msg: FaceEnhanceWorkerRequestNoId,
+    transfer: Transferable[]
+  ): Promise<FaceEnhanceWorkerResponse> => {
+    const worker = getFaceWorker();
+    const id = ++faceWorkerSeqRef.current;
+    return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        worker.removeEventListener("message", onMessage);
+        worker.removeEventListener("error", onError);
+        pendingFaceWorkerRef.current.delete(reject);
+      };
+      const onMessage = (e: MessageEvent<FaceEnhanceWorkerResponse>) => {
+        if (e.data.id !== id) return;
+        cleanup();
+        resolve(e.data);
+      };
+      const onError = () => {
+        cleanup();
+        reject(new Error("Worker gagal memproses foto."));
+      };
+      pendingFaceWorkerRef.current.add(reject);
+      worker.addEventListener("message", onMessage);
+      worker.addEventListener("error", onError);
+      worker.postMessage({ ...msg, id }, transfer);
+    });
+  };
 
   // Metrik perbandingan (local const agar narrowing TS berlaku di JSX).
   const compareMetrics = compare?.result.metrics ?? null;
@@ -172,33 +244,113 @@ export default function FaceEnhancePage() {
     setUpscale(2);
   };
 
-  const download = () => {
-    if (!img) return;
+  /**
+   * Proses resolusi penuh (restore + perbesaran 2×/4×) → Blob PNG. Jalur
+   * worker: drawImage + getImageData di thread utama (ringan), lalu
+   * `applyFaceEnhance` + `upscaleCanvas` + encode PNG (`convertToBlob`) semua
+   * di Web Worker → hasil keluar sebagai Blob. Fallback: `enhanceFace` sinkron
+   * + `toBlob` (jalur lama) bila browser tanpa Worker. Hasil identik dengan
+   * jalur lama — `applyFaceEnhance` adalah sumber tunggal logika restore.
+   */
+  const processFullRes = async (): Promise<Blob> => {
+    if (!img) throw new Error("Tidak ada foto.");
+    if (!useWorker) {
+      const canvas = enhanceFace(img, params, 0, upscale);
+      return new Promise<Blob>((resolve, reject) =>
+        canvas.toBlob(
+          (b) =>
+            b ? resolve(b) : reject(new Error("Gagal membuat PNG.")),
+          "image/png"
+        )
+      );
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) throw new Error("Canvas 2D tidak tersedia.");
+    ctx.drawImage(img, 0, 0);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const buffer = imageData.data.buffer as ArrayBuffer;
+    const res = await postFaceEnhanceWorker(
+      {
+        type: "process",
+        pixels: buffer,
+        w: canvas.width,
+        h: canvas.height,
+        // Kotak wajah dihitung saat upload (`detectFace(image)`) — panggilan
+        // yang sama dengan jalur lama, jadi hasil deteksi identik.
+        face,
+        params,
+        upscale,
+      },
+      [buffer]
+    );
+    if (!res.ok) throw new Error(res.error);
+    return res.blob;
+  };
+
+  /** Bungkus operasi full-res dengan busy state + guard anti-konkurensi. */
+  const withBusy =
+    (op: "download" | "pasfoto" | "layout", fn: () => Promise<void>) =>
+    async () => {
+      if (busyRef.current) return;
+      busyRef.current = true;
+      setBusyOp(op);
+      setError("");
+      try {
+        await fn();
+      } catch (e) {
+        setError(
+          e instanceof Error ? e.message : "Gagal memproses foto."
+        );
+      } finally {
+        busyRef.current = false;
+        setBusyOp(null);
+      }
+    };
+
+  const download = withBusy("download", async () => {
     // Urutan CodeFormer → Real-ESRGAN: restore dulu, lalu perbesar hasilnya.
-    const full = enhanceFace(img, params, 0, upscale);
+    const blob = await processFullRes();
+    const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = full.toDataURL("image/png");
+    a.href = url;
     a.download = "face-enhanced.png";
     a.click();
-  };
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  });
+
+  /** Blob hasil → data URL (modul tujuan memakai data URL: pas foto bahkan
+   *  me-revoke object URL masuknya saat double-mount StrictMode, jadi blob
+   *  URL tidak aman untuk bridge). Base64 via FileReader berjalan di luar
+   *  thread utama (baca blob async) — jauh lebih ringan daripada
+   *  `canvas.toDataURL` sinkron pada resolusi penuh. */
+  const blobToDataUrl = (blob: Blob): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(fr.result as string);
+      fr.onerror = () =>
+        reject(new Error("Gagal mengonversi hasil ke data URL."));
+      fr.readAsDataURL(blob);
+    });
 
   /** Teruskan hasil (sudah diperbesar) ke alur crop pas foto ukuran terpilih. */
-  const forwardToPasFoto = (target: PasFotoTargetId) => {
-    if (!img) return;
-    const full = enhanceFace(img, params, 0, upscale);
-    setPendingPasFoto(full.toDataURL("image/png"));
-    const p = PAS_FOTO_TARGETS.find((s) => s.id === target);
-    navigate(p?.path ?? "/photo-studio/pas-foto-3x4");
-  };
+  const forwardToPasFoto = (target: PasFotoTargetId) =>
+    withBusy("pasfoto", async () => {
+      const blob = await processFullRes();
+      setPendingPasFoto(await blobToDataUrl(blob));
+      const p = PAS_FOTO_TARGETS.find((s) => s.id === target);
+      navigate(p?.path ?? "/photo-studio/pas-foto-3x4");
+    })();
 
   /** Kirim hasil enhance (resolusi penuh, sudah diperbesar) ke Auto Layout. */
-  const forwardToLayout = () => {
-    if (!img) return;
-    const full = enhanceFace(img, params, 0, upscale);
+  const forwardToLayout = withBusy("layout", async () => {
+    const blob = await processFullRes();
     const base = fileName.replace(/\.[^.]+$/, "") || "face-enhanced";
-    setPendingLayoutPhoto(full.toDataURL("image/png"), `${layoutPrefix}${base}`);
+    setPendingLayoutPhoto(await blobToDataUrl(blob), `${layoutPrefix}${base}`);
     navigate("/ai-assistant/auto-layout");
-  };
+  });
 
   /**
    * Bandingkan kualitas Face Enhance vs Video Face Enhance pada frame foto
@@ -486,13 +638,21 @@ export default function FaceEnhancePage() {
             </div>
 
             <div className="result-actions">
-              <button type="button" className="btn btn-primary" onClick={download}>
-                ⬇️ Unduh PNG (ukuran penuh)
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={download}
+                disabled={busyOp !== null}
+              >
+                {busyOp === "download"
+                  ? "⏳ Memproses…"
+                  : "⬇️ Unduh PNG (ukuran penuh)"}
               </button>
               <div className="pasfoto-forward">
                 <select
                   className="tool-select"
                   value={pasTarget}
+                  disabled={busyOp !== null}
                   title="Ukuran pas foto tujuan — hasil enhance + perbesaran diteruskan ke alur crop"
                   onChange={(e) => setPasTarget(e.target.value as PasFotoTargetId)}
                 >
@@ -506,18 +666,31 @@ export default function FaceEnhancePage() {
                   type="button"
                   className="btn btn-primary"
                   onClick={() => forwardToPasFoto(pasTarget)}
+                  disabled={busyOp !== null}
                 >
-                  🪪 Jadikan Pas Foto
+                  {busyOp === "pasfoto"
+                    ? "⏳ Memproses…"
+                    : "🪪 Jadikan Pas Foto"}
                 </button>
               </div>
               <button
                 type="button"
                 className="btn btn-primary"
                 onClick={forwardToLayout}
+                disabled={busyOp !== null}
               >
-                🧩 Susun ke Lembar A4
+                {busyOp === "layout"
+                  ? "⏳ Memproses…"
+                  : "🧩 Susun ke Lembar A4"}
               </button>
             </div>
+            {busyOp && (
+              <p className="hint" style={{ marginTop: 8, marginBottom: 0 }}>
+                ⏳ Memproses resolusi penuh di <strong>Web Worker</strong> — UI
+                tetap responsif; hasilnya identik dengan jalur lama.
+              </p>
+            )}
+            {error && <p className="error">{error}</p>}
           </section>
 
           <section className="panel">
