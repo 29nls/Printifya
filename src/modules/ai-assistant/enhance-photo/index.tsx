@@ -7,6 +7,7 @@ import {
   type EnhanceParams,
 } from "./enhance";
 import { setPendingLayoutPhoto } from "../../shared/autoLayoutBridge";
+import SyncedPhotoCompare from "../../shared/SyncedPhotoCompare";
 import {
   clearEnhanceOptions,
   loadLayoutPrefix,
@@ -274,28 +275,10 @@ export default function EnhancePhotoPage() {
           </section>
 
           <section className="panel">
-            <div className="bg-compare">
-              <figure>
-                <figcaption>Sebelum (asli)</figcaption>
-                <img src={originalUrl} alt="Foto asli" className="bg-preview-img" />
-              </figure>
-              <figure>
-                <figcaption>Sesudah (enhance)</figcaption>
-                {preview && (
-                  <canvas
-                    className="bg-preview-img"
-                    width={preview.width}
-                    height={preview.height}
-                    ref={(el) => {
-                      if (el) {
-                        const ctx = el.getContext("2d");
-                        ctx?.drawImage(preview, 0, 0);
-                      }
-                    }}
-                  />
-                )}
-              </figure>
-            </div>
+            <SyncedPhotoCompare
+              before={{ label: "Sebelum (asli)", src: originalUrl }}
+              after={{ label: "Sesudah (enhance)", canvas: preview }}
+            />
 
             <div className="prefs-row">
               <label className="layout-prefix">
