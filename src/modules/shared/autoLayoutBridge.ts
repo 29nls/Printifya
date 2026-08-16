@@ -37,19 +37,7 @@ export function peekPendingLayoutPhotos(): PendingLayoutPhoto[] | null {
   return pendingLayoutPhotos;
 }
 
-/** Baca foto pertama yang tertunda (pemakaian lama); `null` bila tidak ada. */
-export function peekPendingLayoutPhoto(): PendingLayoutPhoto | null {
-  return pendingLayoutPhotos && pendingLayoutPhotos.length > 0
-    ? pendingLayoutPhotos[0]
-    : null;
-}
-
 /** Kosongkan foto tertunda (dipanggil setelah nilai dikonsumsi). */
 export function clearPendingLayoutPhotos(): void {
   pendingLayoutPhotos = null;
-}
-
-/** Alias lama, tetap tersedia untuk kompatibilitas. */
-export function clearPendingLayoutPhoto(): void {
-  clearPendingLayoutPhotos();
 }
