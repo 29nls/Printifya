@@ -20,7 +20,11 @@
  * video/canvas/MediaRecorder ada di index.tsx.
  */
 
+import { detectFaceFromPixels } from "../../photo-studio/shared/faceDetect";
 import {
+  computeFaceBox,
+  computeStretch,
+  enhancePixels,
   NEUTRAL_PARAMS,
   type FaceBoxPx,
   type FaceEnhanceParams,
@@ -50,6 +54,34 @@ export const DEFAULT_VIDEO_PARAMS: VideoEnhanceParams = {
 export const FPS_OPTIONS = [10, 15, 24, 30] as const;
 export const RES_MODES = ["512", "720", "orig"] as const;
 export const FORMATS = ["webm", "mp4"] as const;
+
+/**
+ * Pipeline per-frame lengkap pada piksel mentah (murni, tanpa DOM): deteksi
+ * wajah (`detectFaceFromPixels`) → kotak wajah → bentangan histogram →
+ * `enhancePixels` → `temporalBlend` terhadap `prev`. SUMBER TUNGGAL logika
+ * per-frame — dipakai Web Worker (`faceWorker.ts`) DAN fallback thread utama
+ * di `index.tsx`, jadi hasil kedua jalur identik. `prev` = frame hasil
+ * sebelumnya (null untuk frame pertama → temporalBlend identitas).
+ */
+export function processFramePixels(
+  data: Uint8ClampedArray,
+  w: number,
+  h: number,
+  params: FaceEnhanceParams,
+  temporal: number,
+  prev: Uint8ClampedArray | null
+): { out: Uint8ClampedArray; faceDetected: boolean } {
+  const face = detectFaceFromPixels(data, w, h);
+  const box = computeFaceBox(face, w, h);
+  const stretch = computeStretch(
+    data,
+    w,
+    box ?? { x0: 0, y0: 0, x1: w, y1: h }
+  );
+  const out = enhancePixels(data, w, h, box, params, stretch);
+  temporalBlend(out, prev, w, h, box, temporal);
+  return { out, faceDetected: box !== null };
+}
 
 /** Ukuran kerja (lebar × tinggi, dimensi genap agar aman untuk codec video).
  *  "orig" mempertahankan ukuran asli; "512"/"720" membatasi sisi terpanjang

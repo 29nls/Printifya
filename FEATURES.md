@@ -168,7 +168,7 @@ dan restorasi wajah video gaya PGTFormer.
 | Fitur | Auto Crop Face | Background Removal | Enhance Photo | Auto Layout | Upscale & Denoise | Face Enhance | Video Face Enhance |
 |---|---|---|---|---|---|---|---|
 | **Mesin** | `autocrop.ts` + `detectFace` | `bgRemove.ts` (skin-tone + flood fill) | histogram + slider | modul sendiri (grid A4) | `waifu2x.ts` (heuristik) | `faceEnhance.ts` (pemulihan wajah heuristik) | `videoEnhance.ts` (per-frame `faceEnhance` + koherensi temporal + MediaRecorder) |
-| **Pipeline Web Worker** (OffscreenCanvas; fallback thread utama bila tidak didukung) | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| **Pipeline Web Worker** (fallback thread utama bila tidak didukung) | ❌ | ❌ | ❌ | ❌ | ✅ (OffscreenCanvas) | ❌ | ✅ (per-frame, tanpa OffscreenCanvas) |
 | Upload | ✅ | ✅ | ✅ | ✅ (banyak foto) | ✅ (batch) | ✅ | ✅ (video) |
 | **Deteksi wajah otomatis** | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ (per frame) |
 | **Crop rasio pas foto** | ✅ (otomatis + edit manual fallback) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
@@ -334,9 +334,19 @@ dan restorasi wajah video gaya PGTFormer.
   (audio `AudioBuffer` diputar ulang saat rekam, track digabung, fallback video saja bila
   muxing audio+video tak didukung, `stop()` membungkus chunk jadi Blob) — diekstrak agar
   modul lain yang merekam canvas (animasi/slideshow) bisa memakainya tanpa menyalin logika.
-  Bagian murni (`pickWorkingSize`/`countFrames`/`temporalBlend`/`computePeaks`) terpisah
-  dari orkestrasi agar bisa diuji tanpa DOM/video; `recordWithAudio` diuji dengan mock
-  MediaRecorder/MediaStream (dengan/tanpa audio, fallback muxing, stop + Blob).
+  Bagian murni (`pickWorkingSize`/`countFrames`/`temporalBlend`/`computePeaks`/
+  `processFramePixels`) terpisah dari orkestrasi agar bisa diuji tanpa DOM/video;
+  `recordWithAudio` diuji dengan mock MediaRecorder/MediaStream (dengan/ tanpa audio,
+  fallback muxing, stop + Blob). **Pipeline per-frame berjalan di Web Worker**: deteksi
+  wajah + `enhancePixels` + `temporalBlend` dieksekusi di `faceWorker.ts` (piksel RGBA
+  masuk/keluar via transfer, tanpa salin; `prev` koherensi temporal dipegang worker dan
+  di-reset via pesan "reset" tiap awal run), sehingga pemrosesan video panjang tidak
+  membekukan UI — thread utama hanya seek/draw/getImageData/putImageData yang ringan.
+  Logika per-frame dibungkus `processFramePixels` (sumber tunggal: `detectFaceFromPixels`
+  — ekstraksi murni dari `detectFace`, downscale area-averaging — dipakai worker DAN
+  fallback thread utama), jadi kedua jalur menghasilkan piksel identik. Fallback thread
+  utama otomatis bila browser tanpa `Worker`; worker di-terminate saat unmount dengan
+  permintaan tertunda ditolak. `detectFaceFromPixels` + `processFramePixels` diuji murni.
 - **Edit Auto Layout**: foto bisa di-drag untuk mengatur ulang urutan — antar sel di lembar
   maupun thumbnail di strip (keduanya memakai array foto yang sama, jadi pratinjau, label,
   PDF, dan cetak ikut urutan baru). Bingkai photobox berasal dari

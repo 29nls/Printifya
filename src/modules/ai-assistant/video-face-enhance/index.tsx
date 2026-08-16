@@ -1,12 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { detectFace } from "../../photo-studio/shared/faceDetect";
-import {
-  computeFaceBox,
-  computeStretch,
-  enhancePixels,
-  type FaceEnhanceParams,
-} from "../face-enhance/faceEnhance";
+import { type FaceEnhanceParams } from "../face-enhance/faceEnhance";
 import { setPendingPasFoto } from "../../shared/pasFotoBridge";
 import { setPendingLayoutPhoto } from "../../shared/autoLayoutBridge";
 import {
@@ -16,10 +10,14 @@ import {
   FPS_OPTIONS,
   FORMATS,
   pickWorkingSize,
+  processFramePixels,
   RES_MODES,
-  temporalBlend,
   type VideoEnhanceParams,
 } from "./videoEnhance";
+import type {
+  FaceWorkerRequestNoId,
+  FaceWorkerResponse,
+} from "./faceWorkerApi";
 import {
   clearVideoOptions,
   loadVideoPrefs,
@@ -170,6 +168,15 @@ export default function VideoFaceEnhancePage() {
   // Promise decode per video (di-cache agar tidak decode ganda; di-reset saat
   // video berganti).
   const audioPromiseRef = useRef<Promise<AudioBuffer | null> | null>(null);
+  // Web Worker pipeline per-frame (deteksi wajah + enhancePixels +
+  // temporalBlend) — UI tetap responsif untuk video panjang; fallback thread
+  // utama bila browser tanpa Worker.
+  const useWorker = typeof Worker !== "undefined";
+  const faceWorkerRef = useRef<Worker | null>(null);
+  const faceWorkerSeqRef = useRef(0);
+  /** Penolak promise postFaceWorker yang masih menunggu — ditolak saat unmount
+   *  (worker di-terminate) agar antrean tidak menggantung. */
+  const pendingFaceWorkerRef = useRef<Set<(e: Error) => void>>(new Set());
   const navigate = useNavigate();
 
   // Persist semua opsi + awalan setiap berubah.
@@ -203,12 +210,61 @@ export default function VideoFaceEnhancePage() {
       }
       audioPromiseRef.current = null;
       stopSyncLoop();
+      // Hentikan worker per-frame: tolak permintaan yang masih menunggu agar
+      // tidak menggantung, lalu terminate.
+      pendingFaceWorkerRef.current.forEach((reject) =>
+        reject(new Error("Worker dihentikan."))
+      );
+      pendingFaceWorkerRef.current.clear();
+      faceWorkerRef.current?.terminate();
+      faceWorkerRef.current = null;
       const { videoUrl: vUrl, resultUrl: rUrl } = urlsRef.current;
       if (vUrl) URL.revokeObjectURL(vUrl);
       if (rUrl) URL.revokeObjectURL(rUrl);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const getFaceWorker = (): Worker => {
+    if (!faceWorkerRef.current) {
+      faceWorkerRef.current = new Worker(
+        new URL("./faceWorker.ts", import.meta.url),
+        { type: "module" }
+      );
+    }
+    return faceWorkerRef.current;
+  };
+
+  /** Kirim satu pekerjaan per-frame ke worker; resolve saat balasan dengan id
+   *  cocok tiba. `pixels` (ArrayBuffer) selalu dikirim via transfer (tanpa
+   *  salin). */
+  const postFaceWorker = (
+    msg: FaceWorkerRequestNoId,
+    transfer: Transferable[]
+  ): Promise<FaceWorkerResponse> => {
+    const worker = getFaceWorker();
+    const id = ++faceWorkerSeqRef.current;
+    return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        worker.removeEventListener("message", onMessage);
+        worker.removeEventListener("error", onError);
+        pendingFaceWorkerRef.current.delete(reject);
+      };
+      const onMessage = (e: MessageEvent<FaceWorkerResponse>) => {
+        if (e.data.id !== id) return;
+        cleanup();
+        resolve(e.data);
+      };
+      const onError = () => {
+        cleanup();
+        reject(new Error("Worker gagal memproses frame."));
+      };
+      pendingFaceWorkerRef.current.add(reject);
+      worker.addEventListener("message", onMessage);
+      worker.addEventListener("error", onError);
+      worker.postMessage({ ...msg, id }, transfer);
+    });
+  };
 
   /**
    * Pastikan AudioBuffer sumber ter-decode (sekali per video; hasil di-cache).
@@ -449,10 +505,24 @@ export default function VideoFaceEnhancePage() {
     cancelledRef.current = false;
     setProcessing(true);
     setProgress({ done: 0, total });
+    // Frame hasil sebelumnya — hanya dipakai fallback thread utama (di worker,
+    // prev dipegang worker dan di-reset via pesan "reset").
     let prev: Uint8ClampedArray | null = null;
     let faceCount = 0;
 
-    /** Proses satu frame: seek → draw → pipeline → koherensi temporal. */
+    // Awali tiap run dengan prev kosong agar koherensi temporal tidak bocor
+    // dari run/video sebelumnya (worker menyimpan prev secara internal).
+    if (useWorker) {
+      try {
+        await postFaceWorker({ type: "reset" }, []);
+      } catch {
+        // worker gagal — proses di thread utama sebagai fallback
+      }
+    }
+
+    /** Proses satu frame: seek → draw → pipeline (worker atau thread utama).
+     *  Pipeline berat (deteksi wajah + enhancePixels + temporalBlend) berjalan
+     *  di Web Worker; thread utama hanya seek/draw/getImageData yang ringan. */
     const processOne = async (i: number): Promise<Uint8ClampedArray | null> => {
       if (cancelledRef.current) return null;
       const t = Math.min(meta.duration, i / params.fps);
@@ -460,19 +530,42 @@ export default function VideoFaceEnhancePage() {
       if (cancelledRef.current) return null;
       ctx.drawImage(video, 0, 0, w, h);
       const img = ctx.getImageData(0, 0, w, h);
-      // Parsing-guided: wajah dideteksi per frame, kotak wajah dipulihkan
-      // lebih kuat; tanpa wajah → koreksi global lembut.
-      const face = detectFace(canvas);
-      const box = computeFaceBox(face, w, h);
-      const stretch = computeStretch(
+      if (useWorker) {
+        // Piksel dikirim via transfer (tanpa salin); hasil di-transfer balik.
+        const res = await postFaceWorker(
+          {
+            type: "processFrame",
+            pixels: img.data.buffer,
+            w,
+            h,
+            params,
+            temporal: params.temporal,
+          },
+          [img.data.buffer]
+        );
+        if (res.type !== "processFrame" || !res.ok) {
+          throw new Error(
+            res.type === "processFrame"
+              ? res.error
+              : "Worker tidak merespons permintaan frame."
+          );
+        }
+        const out = new Uint8ClampedArray(res.pixels);
+        if (res.faceDetected) faceCount++;
+        return out;
+      }
+      // Fallback thread utama (browser tanpa Worker) — sumber tunggal yang
+      // sama dengan worker, jadi hasil identik.
+      const { out, faceDetected } = processFramePixels(
         img.data,
         w,
-        box ?? { x0: 0, y0: 0, x1: w, y1: h }
+        h,
+        params,
+        params.temporal,
+        prev
       );
-      const out = enhancePixels(img.data, w, h, box, params, stretch);
-      temporalBlend(out, prev, w, h, box, params.temporal);
       prev = out;
-      if (box) faceCount++;
+      if (faceDetected) faceCount++;
       return out;
     };
 

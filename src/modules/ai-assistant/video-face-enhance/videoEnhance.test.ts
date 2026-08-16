@@ -4,8 +4,10 @@ import {
   countFrames,
   DEFAULT_VIDEO_PARAMS,
   pickWorkingSize,
+  processFramePixels,
   temporalBlend,
 } from "./videoEnhance";
+import { NEUTRAL_PARAMS } from "../face-enhance/faceEnhance";
 
 describe("pickWorkingSize — resolusi kerja video", () => {
   it("orig mempertahankan ukuran asli (dimensi genap minimal 2)", () => {
@@ -126,6 +128,100 @@ describe("temporalBlend — koherensi temporal (PGTFormer)", () => {
     const prev = new Uint8ClampedArray(4 * 4 * 4);
     temporalBlend(out, prev, W, H, BOX, 100);
     expect([...out]).toEqual([...frame(50)]);
+  });
+});
+
+describe("processFramePixels — pipeline per-frame (sumber tunggal worker/utama)", () => {
+  const W = 40;
+  const H = 40;
+  /** Netral: w=100, semua efek 0 → enhancePixels identitas. */
+  const NEUTRAL: Parameters<typeof processFramePixels>[3] = {
+    ...NEUTRAL_PARAMS,
+    fidelity: 100,
+    smooth: 0,
+    sharpen: 0,
+    color: 0,
+    background: false,
+    restoreColor: false,
+  };
+
+  function gray(v: number): Uint8ClampedArray {
+    const d = new Uint8ClampedArray(W * H * 4);
+    for (let i = 0; i < d.length; i += 4) {
+      d[i] = v;
+      d[i + 1] = v;
+      d[i + 2] = v;
+      d[i + 3] = 255;
+    }
+    return d;
+  }
+
+  /** Wajah kulit di tengah (isSkinLike) di atas latar biru — box terdeteksi. */
+  function faceImage(v: number): Uint8ClampedArray {
+    const d = new Uint8ClampedArray(W * H * 4);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const i = (y * W + x) * 4;
+        const inFace = x > 14 && x < 26 && y > 12 && y < 28;
+        const c = inFace ? [230, 170, 130] : [90, 140, 220];
+        d[i] = v === 0 ? c[0] : Math.min(255, c[0] + v);
+        d[i + 1] = c[1];
+        d[i + 2] = c[2];
+        d[i + 3] = 255;
+      }
+    }
+    return d;
+  }
+
+  it("netral + tanpa wajah + prev null → identitas byte-ke-byte, faceDetected false", () => {
+    const src = gray(120);
+    const { out, faceDetected } = processFramePixels(src, W, H, NEUTRAL, 45, null);
+    expect(out).toEqual(src);
+    expect(faceDetected).toBe(false);
+  });
+
+  it("netral + temporal 0 + prev ada → identitas (koherensi temporal mati)", () => {
+    const src = gray(120);
+    const prev = gray(200);
+    const { out } = processFramePixels(src, W, H, NEUTRAL, 0, prev);
+    expect(out).toEqual(src);
+  });
+
+  it("netral + temporal 100 + prev → output di-blend ke arah prev (k=0.12 bg, tanpa kotak wajah)", () => {
+    const src = gray(0);
+    const prev = gray(200);
+    const { out } = processFramePixels(src, W, H, NEUTRAL, 100, prev);
+    // k=0.12 (latar): 0*(1-0.12)+200*0.12 = 24
+    expect(out[(10 * W + 10) * 4]).toBe(Math.round(200 * 0.12));
+    expect(out[(10 * W + 10) * 4 + 3]).toBe(255);
+  });
+
+  it("wajah terdeteksi → faceDetected true dan output berubah dari input", () => {
+    const src = faceImage(0);
+    const { out, faceDetected } = processFramePixels(
+      src,
+      W,
+      H,
+      { ...NEUTRAL, fidelity: 0, color: 100 },
+      0,
+      null
+    );
+    expect(faceDetected).toBe(true);
+    // Pemulihan aktif → ada piksel yang berubah.
+    let changed = 0;
+    for (let i = 0; i < out.length; i += 4) {
+      if (out[i] !== src[i] || out[i + 1] !== src[i + 1] || out[i + 2] !== src[i + 2]) {
+        changed++;
+      }
+    }
+    expect(changed).toBeGreaterThan(0);
+  });
+
+  it("ukuran sama dengan temporalBlend: prev dengan panjang berbeda diabaikan (identitas)", () => {
+    const src = gray(100);
+    const prev = new Uint8ClampedArray(10 * 10 * 4);
+    const { out } = processFramePixels(src, W, H, NEUTRAL, 100, prev);
+    expect(out).toEqual(src);
   });
 });
 

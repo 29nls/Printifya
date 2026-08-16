@@ -173,17 +173,81 @@ export function detectFace(
   ctx.drawImage(source, 0, 0, w, h);
   const { data } = ctx.getImageData(0, 0, w, h);
 
-  const mask = new Uint8Array(w * h);
-  for (let i = 0, p = 0; i < data.length; i += 4, p++) {
-    mask[p] = isSkinLike(data[i], data[i + 1], data[i + 2]) ? 1 : 0;
+  // Piksel sudah di-diskalakan ke ≤240 lewat canvas — downscale di fungsi
+  // murni menjadi no-op, hasilnya sama persis dengan implementasi lama.
+  return detectFaceFromPixels(data, w, h, MAX);
+}
+
+/** Downscale murni (area averaging per blok) ke sisi terpanjang ≤ `max`.
+ *  Mengembalikan array yang sama bila tidak perlu diskalakan (tanpa salin). */
+function downscalePixels(
+  data: Uint8ClampedArray,
+  w: number,
+  h: number,
+  max: number
+): { data: Uint8ClampedArray; w: number; h: number } {
+  const scale = Math.min(1, max / Math.max(1, Math.max(w, h)));
+  const dw = Math.max(2, Math.round(w * scale));
+  const dh = Math.max(2, Math.round(h * scale));
+  if (dw === w && dh === h) return { data, w, h };
+  const out = new Uint8ClampedArray(dw * dh * 4);
+  for (let y = 0; y < dh; y++) {
+    const sy0 = Math.floor((y * h) / dh);
+    const sy1 = Math.max(sy0 + 1, Math.floor(((y + 1) * h) / dh));
+    for (let x = 0; x < dw; x++) {
+      const sx0 = Math.floor((x * w) / dw);
+      const sx1 = Math.max(sx0 + 1, Math.floor(((x + 1) * w) / dw));
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let a = 0;
+      let n = 0;
+      for (let sy = sy0; sy < sy1; sy++) {
+        for (let sx = sx0; sx < sx1; sx++) {
+          const i = (sy * w + sx) * 4;
+          r += data[i];
+          g += data[i + 1];
+          b += data[i + 2];
+          a += data[i + 3];
+          n++;
+        }
+      }
+      const o = (y * dw + x) * 4;
+      out[o] = r / n;
+      out[o + 1] = g / n;
+      out[o + 2] = b / n;
+      out[o + 3] = a / n;
+    }
+  }
+  return { data: out, w: dw, h: dh };
+}
+
+/**
+ * Deteksi wajah dari piksel mentah RGBA (tanpa DOM) — dipakai `detectFace`
+ * (yang menyiapkan piksel via canvas) dan Web Worker pipeline video. Downscale
+ * ke sisi terpanjang ≤ `max` (default 240) dilakukan di sini via area
+ * averaging; hasil ternormalisasi 0..1 terhadap ukuran masukan.
+ */
+export function detectFaceFromPixels(
+  data: Uint8ClampedArray,
+  w: number,
+  h: number,
+  max = 240
+): FaceRegion | null {
+  if (!data.length || w < 2 || h < 2) return null;
+  const { data: scaled, w: dw, h: dh } = downscalePixels(data, w, h, max);
+
+  const mask = new Uint8Array(dw * dh);
+  for (let i = 0, p = 0; i < scaled.length; i += 4, p++) {
+    mask[p] = isSkinLike(scaled[i], scaled[i + 1], scaled[i + 2]) ? 1 : 0;
   }
 
-  const { components } = collectComponents(mask, w, h);
+  const { components } = collectComponents(mask, dw, dh);
 
   let best: Component | null = null;
   for (const c of components) {
     const aspect = c.w / c.h;
-    const touches = countEdgeTouches(c, w, h);
+    const touches = countEdgeTouches(c, dw, dh);
     // Latar menyentuh tepi; wajah tidak. Tolak bentuk ekstrem & komponen jarang.
     if (touches > 2 || aspect > 2.2 || aspect < 0.25 || c.density < 0.2) {
       continue;
@@ -193,10 +257,10 @@ export function detectFace(
 
   if (!best) return null;
   return {
-    x: best.x / w,
-    y: best.y / h,
-    w: best.w / w,
-    h: best.h / h,
+    x: best.x / dw,
+    y: best.y / dh,
+    w: best.w / dw,
+    h: best.h / dh,
     area: best.area,
   };
 }
