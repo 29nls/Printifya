@@ -92,6 +92,10 @@ export default function BackgroundRemovalPage() {
   // busy state; proses lama yang selesai belakangan dibuang (P1 tidak mematikan
   // busy saat P2 masih encode → tidak ada flicker panel).
   const opSeqRef = useRef(0);
+  // Token urutan operasi recolor/mask (ganti latar / unduh mask): naik tiap
+  // selectBg / downloadMask — mencegah `.finally` proses lama mematikan bgBusy
+  // saat proses baru masih berjalan (klik warna latar cepat beruntun).
+  const recolorSeqRef = useRef(0);
   // Worker memiliki ImageBitmap hasil + mask (createImageBitmap + transfer
   // zero-copy) — komposit & encode PNG berjalan di luar thread utama.
   // `workerReadyRef` = hasil aktif sudah ada di worker (untuk selectBg /
@@ -391,20 +395,22 @@ export default function BackgroundRemovalPage() {
     if (useWorker && workerReadyRef.current) {
       setBgBusy(true);
       setError("");
-      const token = fileSeqRef.current;
+      const fileToken = fileSeqRef.current;
+      const opToken = ++recolorSeqRef.current;
       bgWorkerClient
         .post({ type: "recolor", hex: opt.hex })
         .then(async (res) => {
-          if (token !== fileSeqRef.current) return;
+          if (fileToken !== fileSeqRef.current || opToken !== recolorSeqRef.current) return;
           if (!res.ok) throw new Error(res.error);
           await applyResultBlob(res.blob, opt.hex);
         })
         .catch((e) => {
-          if (token !== fileSeqRef.current) return;
+          if (fileToken !== fileSeqRef.current || opToken !== recolorSeqRef.current) return;
           setError(e instanceof Error ? e.message : "Gagal mengganti latar.");
         })
         .finally(() => {
-          if (token === fileSeqRef.current) setBgBusy(false);
+          // Hanya operasi recolor TERBARU yang menutup bgBusy.
+          if (fileToken === fileSeqRef.current && opToken === recolorSeqRef.current) setBgBusy(false);
         });
       return;
     }
@@ -428,18 +434,24 @@ export default function BackgroundRemovalPage() {
     const base = fileName.replace(/\.[^.]+$/, "") || "background-removed";
     if (useWorker && workerReadyRef.current) {
       setBgBusy(true);
+      const fileToken = fileSeqRef.current;
+      const opToken = ++recolorSeqRef.current;
       bgWorkerClient
         .post({ type: "mask" })
         .then((res) => {
+          if (fileToken !== fileSeqRef.current || opToken !== recolorSeqRef.current) return;
           if (!res.ok) throw new Error(res.error);
           downloadUrl(URL.createObjectURL(res.blob), `${base}-mask.png`);
         })
-        .catch((e) =>
+        .catch((e) => {
+          if (fileToken !== fileSeqRef.current || opToken !== recolorSeqRef.current) return;
           setError(
             e instanceof Error ? e.message : "Gagal mengekspor mask."
-          )
-        )
-        .finally(() => setBgBusy(false));
+          );
+        })
+        .finally(() => {
+          if (fileToken === fileSeqRef.current && opToken === recolorSeqRef.current) setBgBusy(false);
+        });
       return;
     }
     const mask = maskRef.current;
