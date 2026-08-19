@@ -38,6 +38,21 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
+/** Tipe generik untuk objek yang bisa di-draw ke canvas (HTMLImageElement atau ImageBitmap). */
+interface Drawble {
+  readonly width: number;
+  readonly height: number;
+}
+
+function isDrawble(v: unknown): v is Drawble {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    "width" in v &&
+    "height" in v
+  );
+}
+
 /** Context audio dibuat dalam gestur klik (autoplay dengan suara diizinkan). */
 function makeAudioContext(): AudioContext | null {
   try {
@@ -84,6 +99,12 @@ export default function SlideshowToVideoPage() {
   const [progress, setProgress] = useState(0);
   const [recBytes, setRecBytes] = useState(0);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
+  // Pra-render: ImageBitmap[] sebelum rekaman dimulai — setiap drawImage
+  // dari ImageBitmap lebih cepat dari HTMLImageElement karena pixel sudah
+  // ter-decode di memori (tidak re-decode saat draw).
+  const [prerendering, setPrerendering] = useState(false);
+  const [prerenderProgress, setPrerenderProgress] = useState(0);
+  const prerenderedRef = useRef<ImageBitmap[] | null>(null);
 
   const previewRef = useRef<HTMLCanvasElement>(null);
   const timeRef = useRef<HTMLSpanElement>(null);
@@ -106,9 +127,12 @@ export default function SlideshowToVideoPage() {
 
   // --- Gambar satu frame slideshow (cover-fit + fade tumpang-tindih) ---
   // Satu fungsi untuk pratinjau DAN rekaman → kedua jalur identik.
+  // `slides` boleh HTMLImageElement[] (pratinjau) ATAU ImageBitmap[] (rekaman
+  // dengan pra-render) — keduanya punya naturalWidth/naturalHeight + bisa
+  // di-draw via ctx.drawImage.
   const drawFrame = useCallback(
-    (canvas: HTMLCanvasElement | null, t: number) => {
-      if (!canvas || photos.length === 0) return;
+    (canvas: HTMLCanvasElement | null, t: number, slides: readonly Drawble[]) => {
+      if (!canvas || slides.length === 0) return;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
       const w = canvas.width;
@@ -116,20 +140,21 @@ export default function SlideshowToVideoPage() {
       ctx.globalAlpha = 1;
       ctx.fillStyle = "#000";
       ctx.fillRect(0, 0, w, h);
-      const fr = frameAt(t, photos.length, prefs.slideDur, prefs.fadeDur);
-      const img = photos[fr.index];
-      if (!img || !img.naturalWidth) return;
-      const r = coverFit(img.naturalWidth, img.naturalHeight, w, h);
-      ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);
-      if (fr.next != null && fr.fade > 0 && photos[fr.next]) {
-        const nxt = photos[fr.next];
-        const nr = coverFit(nxt.naturalWidth, nxt.naturalHeight, w, h);
+      const fr = frameAt(t, slides.length, prefs.slideDur, prefs.fadeDur);
+      const img = slides[fr.index];
+      if (!img || !isDrawble(img) || !img.width) return;
+      const r = coverFit(img.width, img.height, w, h);
+      ctx.drawImage(img as CanvasImageSource, r.dx, r.dy, r.dw, r.dh);
+      if (fr.next != null && fr.fade > 0 && slides[fr.next]) {
+        const nxt = slides[fr.next];
+        if (!isDrawble(nxt)) return;
+        const nr = coverFit(nxt.width, nxt.height, w, h);
         ctx.globalAlpha = fr.fade;
-        ctx.drawImage(nxt, nr.dx, nr.dy, nr.dw, nr.dh);
+        ctx.drawImage(nxt as CanvasImageSource, nr.dx, nr.dy, nr.dw, nr.dh);
         ctx.globalAlpha = 1;
       }
     },
-    [photos, prefs.slideDur, prefs.fadeDur]
+    [prefs.slideDur, prefs.fadeDur]
   );
 
   /** Decode musik latar SEKALI (via OfflineAudioContext, tanpa gestur) — hasil
@@ -202,7 +227,7 @@ export default function SlideshowToVideoPage() {
         const total = totalDuration(photos.length, prefs.slideDur);
         const t = (performance.now() - playStartRef.current) / 1000;
         const tt = total > 0 ? t % total : 0;
-        drawFrame(previewRef.current, tt);
+        drawFrame(previewRef.current, tt, photos);
         if (timeRef.current) {
           timeRef.current.textContent = fmtTime(Math.min(t, total));
         }
@@ -245,6 +270,10 @@ export default function SlideshowToVideoPage() {
       cancelledRef.current = true;
       stopPreviewMusic();
       if (resultUrlRef.current) URL.revokeObjectURL(resultUrlRef.current);
+      if (prerenderedRef.current) {
+        prerenderedRef.current.forEach((b) => b.close());
+        prerenderedRef.current = null;
+      }
       void audioCtxRef.current?.close().catch(() => {});
       audioCtxRef.current = null;
     };
@@ -325,6 +354,11 @@ export default function SlideshowToVideoPage() {
 
   // --- Rekaman (real-time, WebM via recordWithAudio + musik latar loop) ---
   const finishRecord = useCallback(async (rec: AudioRecorder) => {
+    // Bersihkan ImageBitmap pra-render setelah rekaman selesai.
+    if (prerenderedRef.current) {
+      prerenderedRef.current.forEach((b) => b.close());
+      prerenderedRef.current = null;
+    }
     let blob: Blob | null = null;
     try {
       blob = await rec.stop();
@@ -349,6 +383,39 @@ export default function SlideshowToVideoPage() {
     if (photos.length === 0 || recording) return;
     setError(null);
     stopPreview();
+
+    // --- Fase 1: Pra-render semua foto sebagai ImageBitmap ---
+    // Setiap drawImage dari ImageBitmap lebih cepat dari HTMLImageElement
+    // karena pixel sudah ter-decode di memori (tidak re-decode saat draw).
+    // Ini mencegah UI beku untuk batch foto besar selama rekaman real-time.
+    setPrerendering(true);
+    setPrerenderProgress(0);
+    const bitmaps: ImageBitmap[] = [];
+    try {
+      for (let i = 0; i < photos.length; i++) {
+        if (cancelledRef.current) {
+          setPrerendering(false);
+          return;
+        }
+        const bmp = await createImageBitmap(photos[i]);
+        bitmaps.push(bmp);
+        setPrerenderProgress((i + 1) / photos.length);
+      }
+      prerenderedRef.current = bitmaps;
+    } catch (e) {
+      // Gagal pra-render — cleanup dan jatuh ke HTMLImageElement
+      bitmaps.forEach((b) => b.close());
+      prerenderedRef.current = null;
+      setPrerendering(false);
+      setError(
+        e instanceof Error
+          ? `Gagal memuat foto: ${e.message}`
+          : "Gagal memuat foto untuk rekaman."
+      );
+      return;
+    }
+    setPrerendering(false);
+
     const canvas = document.createElement("canvas");
     canvas.width = res.width;
     canvas.height = res.height;
@@ -398,6 +465,7 @@ export default function SlideshowToVideoPage() {
     setRecording(true);
     setProgress(0);
     setRecBytes(0);
+    const slides: readonly Drawble[] = (prerenderedRef.current as Drawble[] | null) ?? photos;
     const total = totalDuration(photos.length, prefs.slideDur);
     const start = performance.now();
     let lastProgressUpdate = 0;
@@ -405,8 +473,8 @@ export default function SlideshowToVideoPage() {
       try {
         const t = (performance.now() - start) / 1000;
         const target = Math.min(total, t);
-        drawFrame(canvas, target);
-        drawFrame(previewRef.current, target); // umpan balik live di pratinjau
+        drawFrame(canvas, target, slides);
+        drawFrame(previewRef.current, target, slides); // umpan balik live di pratinjau
         if (timeRef.current) timeRef.current.textContent = fmtTime(target);
         const p = total > 0 ? target / total : 1;
         if (performance.now() - lastProgressUpdate > 120 || p >= 1) {
@@ -648,10 +716,14 @@ export default function SlideshowToVideoPage() {
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={recording}
+                disabled={recording || prerendering}
                 onClick={() => void startRecord()}
               >
-                {recording ? "⏳ Merekam…" : "🎬 Rekam Video"}
+                {prerendering
+                  ? `⏳ Memuat foto… ${Math.round(prerenderProgress * 100)}%`
+                  : recording
+                    ? "⏳ Merekam…"
+                    : "🎬 Rekam Video"}
               </button>
               {recording && (
                 <button type="button" className="btn" onClick={cancelRecord}>
