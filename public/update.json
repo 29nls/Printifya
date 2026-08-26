@@ -1,0 +1,15 @@
+{
+  "version": "1.1.0",
+  "versionCode": 110,
+  "releaseDate": "2026-08-27",
+  "notes": [
+    "Fitur Auto-Update otomatis",
+    "Tombol Bagikan PDF via Android Share Sheet",
+    "Splash screen custom dengan icon printer",
+    "Performance improvements",
+    "Bug fixes"
+  ],
+  "apkUrl": "https://github.com/29nls/Printifya/releases/download/v1.1.0/Printifya.apk",
+  "releaseUrl": "https://github.com/29nls/Printifya/releases/tag/v1.1.0",
+  "fileSize": 7680000
+}

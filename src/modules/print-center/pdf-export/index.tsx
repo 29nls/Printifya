@@ -8,6 +8,7 @@ import {
   MIN_MARGIN_CM,
   orientedDims,
   printPasFotoPdf,
+  sharePasFotoPdf,
   type SheetOrientation,
 } from "../../photo-studio/shared/exportPdf";
 import { getPaper, PAPER_SIZES, type PaperSize } from "../../photo-studio/shared/paperSize";
@@ -161,6 +162,43 @@ export default function PdfExportPage() {
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Gagal membuat PDF.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const sharePdf = async () => {
+    if (busy || printing) return;
+    setError("");
+    setInfo("");
+    setBusy(true);
+    try {
+      if (mode === "foto") {
+        if (!photoUrl) throw new Error("Upload foto dulu.");
+        if (!fotoFits) throw new Error(`Grid ${cols}×${rows} tidak muat di ${paper.name}.`);
+        await sharePasFotoPdf(size, photoUrl, {
+          cols,
+          rows,
+          marginCm,
+          paper,
+          orientation,
+        });
+        setInfo(`PDF ${paper.name} (${orientation}) siap dibagikan.`);
+      } else {
+        // For documents, build PDF first then share
+        const doc = buildTextPdf(docTitle, docBody, paper, orientation, marginCm);
+        const blob = doc.output("blob");
+        const filename = `dokumen-${paper.id}-${orientation}.pdf`;
+        // Use native share
+        const { sharePdf: sharePdfFn } = await import("../../shared/nativeShare");
+        await sharePdfFn(blob, filename, {
+          title: docTitle || "Dokumen Printifya",
+          text: "Dokumen dari Printifya",
+        });
+        setInfo(`PDF dokumen ${paper.name} (${orientation}) siap dibagikan.`);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Gagal membagikan PDF.");
     } finally {
       setBusy(false);
     }
@@ -381,6 +419,9 @@ p { margin: 0 0 8pt; text-align: justify; }
           <div className="pdfx-actions">
             <button type="button" className="btn btn-primary" disabled={busy || printing || (mode === "foto" && !fotoFits)} onClick={exportPdf}>
               {busy ? "Menyiapkan…" : "⬇️ Ekspor PDF"}
+            </button>
+            <button type="button" className="btn btn-primary" disabled={busy || printing || (mode === "foto" && !fotoFits)} onClick={sharePdf}>
+              {busy ? "Menyiapkan…" : "📤 Bagikan"}
             </button>
             <button type="button" className="btn btn-primary" disabled={busy || printing || (mode === "foto" && !fotoFits)} onClick={printPdf}>
               {printing ? "Menyiapkan…" : "🖨️ Cetak"}

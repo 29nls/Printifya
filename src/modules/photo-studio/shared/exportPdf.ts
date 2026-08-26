@@ -4,6 +4,7 @@ import {
   type WorkerClient,
 } from "../../shared/createWorkerClient";
 import { downloadUrl } from "../../shared/downloadUrl";
+import { sharePdf, type ShareOptions } from "../../shared/nativeShare";
 import type { PasFotoSize } from "./pasFotoSize";
 import { getPaper } from "./paperSize";
 import {
@@ -294,4 +295,40 @@ export function printLayoutPdf(
   options: PdfSheetOptions
 ): Promise<boolean> {
   return openPrintPdf(size, srcs, options);
+}
+
+// --- Native Share ---
+
+/** Bagikan PDF pas foto via native share sheet (Android) atau Web Share API. */
+export async function sharePasFotoPdf(
+  size: PasFotoSize,
+  dataUrl: string,
+  options: PdfSheetOptions,
+  shareOptions?: ShareOptions
+): Promise<boolean> {
+  const blob = await buildSheetBlob(size, dataUrl, options, false);
+  const paperId = getPaper(options.paper?.id).id;
+  const filename = `${size.fileName}-${paperId}.pdf`;
+  return sharePdf(blob, filename, {
+    title: `Pas Foto ${size.label}`,
+    text: `Pas foto ${size.label} dari Printifya`,
+    ...shareOptions,
+  });
+}
+
+/** Bagikan PDF layout via native share sheet. */
+export async function shareLayoutPdf(
+  size: PasFotoSize,
+  srcs: string[],
+  options: PdfSheetOptions,
+  shareOptions?: ShareOptions
+): Promise<boolean> {
+  const blob = await buildSheetBlob(size, srcs, options, false);
+  const paperId = getPaper(options.paper?.id).id;
+  const filename = `${size.fileName}-layout-${paperId}.pdf`;
+  return sharePdf(blob, filename, {
+    title: `Layout ${size.label}`,
+    text: `Layout pas foto ${size.label} dari Printifya`,
+    ...shareOptions,
+  });
 }

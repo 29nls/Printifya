@@ -3,6 +3,8 @@ import { Navigate, NavLink, Route, Routes } from "react-router-dom";
 import { LEAF_MODULES, MODULES } from "./modules/registry";
 import ModuleErrorBoundary from "./components/ModuleErrorBoundary";
 import Home from "./pages/Home";
+import { useAutoUpdate } from "./components/useAutoUpdate";
+import UpdateDialog from "./components/UpdateDialog";
 
 /** Fallback singkat saat chunk modul sedang diunduh (lazy load). */
 function PageLoader() {
@@ -14,7 +16,18 @@ function PageLoader() {
   );
 }
 
+// Auto-update endpoint — ganti URL ini dengan endpoint server kamu
+// Format JSON: { version: "1.0.0", versionCode: 100, notes: "...", apkUrl: "..." }
+const UPDATE_ENDPOINT = "https://raw.githubusercontent.com/printifya/printifya-app/main/update.json";
+
 export default function App() {
+  const {
+    hasUpdate,
+    updateInfo,
+    dismiss,
+    onSkip,
+  } = useAutoUpdate({ endpoint: UPDATE_ENDPOINT });
+
   return (
     <div className="app">
       <aside className="sidebar">
@@ -94,6 +107,15 @@ export default function App() {
           </Routes>
         </Suspense>
       </main>
+
+      {/* Auto-update dialog */}
+      {hasUpdate && updateInfo && (
+        <UpdateDialog
+          updateInfo={updateInfo}
+          onDismiss={dismiss}
+          onSkip={onSkip}
+        />
+      )}
     </div>
   );
 }

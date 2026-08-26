@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportHeight="108"
+    android:viewportWidth="108">
+
+    <!-- Printer body - rounded rectangle -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M28,36c-2.2,0 -4,1.8 -4,4v20c0,2.2 1.8,4 4,4h52c2.2,0 4,-1.8 4,-4v-20c0,-2.2 -1.8,-4 -4,-4z" />
+
+    <!-- Printer control panel -->
+    <path
+        android:fillColor="#303F9F"
+        android:pathData="M32,40h12v6h-12z" />
+
+    <!-- Status LED - green -->
+    <path
+        android:fillColor="#4CAF50"
+        android:pathData="M50,43m-2.5,0a2.5,2.5 0,1 1,5 0a2.5,2.5 0,1 1,-5 0" />
+
+    <!-- Paper input tray -->
+    <path
+        android:fillColor="#E8EAF6"
+        android:pathData="M24,60h60v4c0,2.2 -1.8,4 -4,4h-52c-2.2,0 -4,-1.8 -4,-4z" />
+
+    <!-- Output paper with photo -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M34,68h40v16c0,2.2 -1.8,4 -4,4h-32c-2.2,0 -4,-1.8 -4,-4z" />
+
+    <!-- Photo image on output paper - landscape -->
+    <path
+        android:fillColor="#3F51B5"
+        android:pathData="M38,72h32v8h-32z" />
+
+    <!-- Sun in photo -->
+    <path
+        android:fillColor="#FFC107"
+        android:pathData="M62,74m-2,0a2,2 0,1 1,4 0a2,2 0,1 1,-4 0" />
+
+    <!-- Mountain in photo -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M40,80l8,-5l6,3l8,-6l10,8z" />
+
+    <!-- Printer feet -->
+    <path
+        android:fillColor="#90A4AE"
+        android:pathData="M30,88h6v2h-6z" />
+    <path
+        android:fillColor="#90A4AE"
+        android:pathData="M72,88h6v2h-6z" />
+</vector>

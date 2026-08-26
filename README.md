@@ -225,3 +225,124 @@ npm run dev        # development server (http://localhost:5173)
 npm run build      # typecheck + production build
 npm run typecheck  # typecheck saja
 ```
+
+## Android (Capacitor)
+
+Printifya bisa dibangun sebagai aplikasi Android menggunakan
+[Capacitor](https://capacitorjs.com/). Aplikasi Android menggunakan WebView
+untuk menjalankan web app yang sama persis.
+
+### Prasyarat
+
+- **JDK 17+** — unduh dari [Adoptium](https://adoptium.net/) atau `brew install openjdk@17`
+- **Android Studio** — unduh dari [developer.android.com](https://developer.android.com/studio)
+- **Android SDK** — terpasang lewat Android Studio SDK Manager (API 36+)
+
+### Build
+
+```bash
+npm run android:build   # typecheck + build + sync ke Android
+```
+
+### Buka di Android Studio
+
+```bash
+npm run android:open    # buka project Android di Android Studio
+```
+
+Lalu klik **Run ▶** di Android Studio untuk menginstall ke emulator/perangkat.
+
+### Build APK tanpa Android Studio
+
+```bash
+npm run build && npx cap sync android
+cd android && ./gradlew assembleDebug
+# APK: android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+### Plugin Capacitor
+
+| Plugin | Fungsi |
+|---|---|
+| `@capacitor/core` | Core runtime |
+| `@capacitor/camera` | Akses kamera & galeri |
+| `@capacitor/filesystem` | Baca/tulis file |
+| `@capacitor/share` | Native share sheet (bagikan PDF) |
+| `@capacitor/splash-screen` | Splash screen custom |
+| `@capacitor/app` | App info & lifecycle |
+| `@capacitor/browser` | Buka URL eksternal |
+| `@capacitor/preferences` | Local storage key-value |
+| `@capacitor/device` | Info perangkat |
+
+### Catatan
+
+- Fitur QZ Tray (WebSocket ke localhost) tidak tersedia di Android — gunakan
+  fallback PDF Export atau cetak via dialog bawaan.
+- Fitur Network Printer (IPP) juga terbatas di Android WebView.
+- Upload foto dari galeri berfungsi via `<input type="file" />` (WebView).
+- Ekspor PDF tetap berfungsi — file diunduh ke folder Download perangkat.
+- **Native Share** — Tombol "Bagikan" di PDF Export menggunakan Android share
+  sheet untuk membagikan PDF via WhatsApp, Email, Bluetooth, dll. Di web,
+  fitur ini menggunakan Web Share API atau fallback ke download.
+
+### Auto-Update
+
+Printifya mendukung auto-update untuk aplikasi Android. Saat versi baru tersedia,
+pengguna akan melihat dialog untuk mengunduh dan menginstall update.
+
+#### Cara Kerja
+
+1. App mengecek endpoint JSON setiap 6 jam (atau saat startup)
+2. Jika versi baru ditemukan, dialog update muncul
+3. User klik "Update Sekarang" → APK diunduh → installer terbuka
+4. User bisa skip versi tertentu ("Nanti Saja")
+
+#### Setup Server Update
+
+Buat file `update.json` yang bisa diakses publik:
+
+```json
+{
+  "version": "1.1.0",
+  "versionCode": 110,
+  "releaseDate": "2026-08-27",
+  "notes": [
+    "Fitur Auto-Update otomatis",
+    "Tombol Bagikan PDF via Android Share Sheet",
+    "Performance improvements"
+  ],
+  "apkUrl": "https://github.com/user/repo/releases/download/v1.1.0/Printifya.apk",
+  "releaseUrl": "https://github.com/user/repo/releases/tag/v1.1.0",
+  "fileSize": 7680000
+}
+```
+
+#### Endpoint Options
+
+**GitHub Releases (Recommended)**:
+```ts
+import { githubUpdateConfig } from "./shared/autoUpdate";
+
+const config = githubUpdateConfig({
+  owner: "printifya",
+  repo: "printifya-app",
+  onUpdateAvailable: (info) => showUpdateDialog(info),
+});
+```
+
+**Custom Server**:
+```ts
+const config = {
+  endpoint: "https://api.myserver.com/updates/latest",
+  checkIntervalMs: 6 * 60 * 60 * 1000, // 6 hours
+};
+```
+
+#### Files
+
+| File | Fungsi |
+|---|---|
+| `src/modules/shared/autoUpdate.ts` | Core update logic |
+| `src/components/UpdateDialog.tsx` | UI dialog |
+| `src/components/useAutoUpdate.ts` | React hook |
+| `public/update.json` | Example manifest |
