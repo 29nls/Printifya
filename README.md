@@ -343,8 +343,24 @@ GitHub Actions akan otomatis:
 
 | Command | Fungsi |
 |---|---|
-| `npm run release 1.2.0` | Full release (build + APK + GitHub) |
+| `npm run release 1.2.0` | **Full release** (build + commit + push + tag + release) |
 | `npm run release:dry 1.2.0` | Dry run tanpa publish |
+| `npm run release:no-push 1.2.0` | Build + commit tanpa push |
+| `npm run release:local 1.2.0` | Build APK saja (no git, no release) |
+
+**Full release flow:**
+```bash
+npm run release 1.2.0
+# Output:
+# ✅ Build web assets
+# ✅ Build release APK (signed)
+# ✅ Git commit: "chore: release v1.2.0"
+# ✅ Git push to GitHub
+# ✅ Git tag: v1.2.0
+# ✅ Push tag to GitHub
+# ✅ Create GitHub Release with APK
+# ✅ Users auto-update within 6 hours
+```
 
 #### Alur Auto-Update
 

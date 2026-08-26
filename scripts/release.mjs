@@ -4,17 +4,21 @@
  * Printifya Release Script
  * 
  * Usage:
- *   node scripts/release.mjs <version> [--dry-run]
+ *   node scripts/release.mjs <version> [--dry-run] [--no-push] [--local-only]
  * 
  * Examples:
- *   node scripts/release.mjs 1.2.0
- *   node scripts/release.mjs 1.2.0 --dry-run
+ *   node scripts/release.mjs 1.2.0              # Full release (build + commit + push + tag + release)
+ *   node scripts/release.mjs 1.2.0 --dry-run    # Dry run tanpa publish
+ *   node scripts/release.mjs 1.2.0 --no-push    # Build + commit tanpa push
+ *   node scripts/release.mjs 1.2.0 --local-only # Build APK saja (no git, no release)
  * 
  * What it does:
  *   1. Bumps version in package.json & android/app/build.gradle
  *   2. Runs typecheck & build
  *   3. Builds release APK (signed)
- *   4. Creates GitHub Release with APK attached
+ *   4. Git commit + push
+ *   5. Create git tag v{version} + push
+ *   6. Creates GitHub Release with APK attached
  * 
  * Prerequisites:
  *   - GITHUB_TOKEN environment variable (or gh CLI authenticated)
@@ -34,6 +38,8 @@ const ROOT = resolve(__dirname, "..");
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
+const noPush = args.includes("--no-push");
+const localOnly = args.includes("--local-only");
 const version = args.find((a) => !a.startsWith("--"));
 
 if (!version) {
@@ -132,43 +138,80 @@ async function release() {
   console.log(`   APK: ${apkPath}`);
   console.log(`   Size: ${(apkSize / 1024 / 1024).toFixed(1)} MB`);
 
-  // 8. Create GitHub Release
-  console.log("\n🐙 Creating GitHub Release...");
+  // 8. Git Commit & Push (unless local-only or no-push)
+  if (!localOnly && !noPush && !dryRun) {
+    console.log("\n📝 Creating git commit...");
+    run("git add package.json android/app/build.gradle");
+    run(`git commit -m "chore: release v${version}"`);
+    
+    console.log("\n⬆️  Pushing to GitHub...");
+    run("git push");
+  } else if (noPush) {
+    console.log("\n📝 Creating git commit (no push)...");
+    run("git add package.json android/app/build.gradle");
+    run(`git commit -m "chore: release v${version}"`);
+  }
+
+  // 9. Create & Push Git Tag
   const tag = `v${version}`;
+  if (!localOnly && !dryRun) {
+    console.log(`\n🏷️  Creating git tag ${tag}...`);
+    run(`git tag -a ${tag} -m "Release ${version}"`);
+    
+    if (!noPush) {
+      console.log(`\n⬆️  Pushing tag ${tag} to GitHub...`);
+      run(`git push origin ${tag}`);
+    }
+  } else if (dryRun) {
+    console.log("\n  [dry-run] Would create tag:", tag);
+  }
+
+  // 10. Create GitHub Release (unless local-only)
   const releaseName = `Printifya ${version}`;
   const releaseNotes = generateReleaseNotes(version);
 
-  if (dryRun) {
-    console.log("  [dry-run] Would create release:");
-    console.log(`    Tag: ${tag}`);
-    console.log(`    Name: ${releaseName}`);
-    console.log(`    APK: Printifya.apk`);
-  } else {
-    // Check for GitHub token
-    const token = process.env.GITHUB_TOKEN;
-    if (!token) {
-      console.log("\n⚠️  GITHUB_TOKEN not set. Skipping GitHub Release creation.");
-      console.log("   To create release manually:");
-      console.log(`   gh release create ${tag} "${apkPath}" --title "${releaseName}" --notes-file release-notes.md`);
+  if (!localOnly) {
+    console.log("\n🐙 Creating GitHub Release...");
+    
+    if (dryRun) {
+      console.log("  [dry-run] Would create release:");
+      console.log(`    Tag: ${tag}`);
+      console.log(`    Name: ${releaseName}`);
+      console.log(`    APK: Printifya.apk`);
     } else {
-      // Create release using GitHub API
-      const repo = "printifya/printifya-app";
-      const createRelease = `gh release create ${tag} "${apkPath}" --repo ${repo} --title "${releaseName}" --notes "${releaseNotes.replace(/"/g, '\\"')}"`;
-      run(createRelease);
+      // Check for GitHub token
+      const token = process.env.GITHUB_TOKEN;
+      const hasGhCli = !dryRun && execSync("which gh 2>/dev/null || echo \"\"", { cwd: ROOT, encoding: "utf-8" }).trim();
+      
+      if (!token && !hasGhCli) {
+        console.log("\n⚠️  GITHUB_TOKEN not set & gh CLI not found.");
+        console.log("   To create release manually:");
+        console.log(`   gh release create ${tag} "${apkPath}" --title "${releaseName}"`);
+        console.log(`   \n   Or set GITHUB_TOKEN and re-run this script.`);
+      } else {
+        // Create release using gh CLI
+        const repo = "printifya/printifya-app";
+        const createRelease = `gh release create ${tag} "${apkPath}" --repo ${repo} --title "${releaseName}" --notes "${releaseNotes.replace(/"/g, '\\"')}"`;
+        run(createRelease);
+      }
     }
   }
 
-  // 9. Summary
+  // 11. Summary
   console.log("\n" + "═".repeat(40));
   console.log("✅ Release complete!");
   console.log(`   Version: ${version}`);
   console.log(`   Tag: ${tag}`);
   console.log(`   APK: android/app/build/outputs/apk/release/Printifya.apk`);
+  if (!localOnly && !noPush) {
+    console.log(`   Git: Pushed to GitHub`);
+    console.log(`   Release: https://github.com/printifya/printifya-app/releases/tag/${tag}`);
+  }
   console.log("═".repeat(40));
-  console.log("\n📋 Next steps:");
-  console.log("   1. Push to GitHub: git push && git push --tags");
-  console.log("   2. Verify release at: https://github.com/printifya/printifya-app/releases");
-  console.log("   3. Users will auto-update within 6 hours (or restart app)");
+  
+  if (!localOnly && !noPush) {
+    console.log("\n📱 Users will auto-update within 6 hours (or restart app)");
+  }
 }
 
 function generateReleaseNotes(version) {
