@@ -82,22 +82,61 @@ function isNative(): boolean {
   return Capacitor.isNativePlatform();
 }
 
+// ── GitHub Releases API Response ──────────────────────────────────────────
+
+interface GitHubRelease {
+  tag_name: string;
+  name: string | null;
+  body: string | null;
+  published_at: string;
+  assets: Array<{
+    name: string;
+    browser_download_url: string;
+    size: number;
+  }>;
+}
+
 // ── Main API ───────────────────────────────────────────────────────────────
+
+/**
+ * Parse GitHub Releases API response into UpdateInfo.
+ */
+function parseGitHubRelease(release: GitHubRelease): UpdateInfo {
+  // Extract version from tag (remove 'v' prefix)
+  const version = release.tag_name.replace(/^v/i, "");
+
+  // Find APK asset
+  const apkAsset = release.assets.find((a) =>
+    a.name.endsWith(".apk") && !a.name.includes("unsigned")
+  );
+
+  return {
+    version,
+    versionCode: parseVersionCode(version),
+    notes: release.body ?? undefined,
+    apkUrl: apkAsset?.browser_download_url,
+    releaseUrl: release.tag_name
+      ? `https://github.com/releases/tag/${release.tag_name}`
+      : undefined,
+    fileSize: apkAsset?.size,
+    releaseDate: release.published_at,
+  };
+}
+
+/**
+ * Parse version string to numeric code (e.g., "1.2.3" → 10203).
+ */
+function parseVersionCode(version: string): number {
+  const parts = version.split(".").map(Number);
+  return (parts[0] ?? 0) * 10000 + (parts[1] ?? 0) * 100 + (parts[2] ?? 0);
+}
 
 /**
  * Check for app updates from a remote endpoint.
  *
- * Expected JSON response from `config.endpoint`:
- * ```json
- * {
- *   "version": "1.2.0",
- *   "versionCode": 120,
- *   "notes": "- Fix bug X\n- Add feature Y",
- *   "apkUrl": "https://github.com/.../app-release.apk",
- *   "releaseUrl": "https://github.com/.../releases/tag/v1.2.0",
- *   "releaseDate": "2026-08-27"
- * }
- * ```
+ * Supports two formats:
+ * 1. GitHub Releases API (tag-based): https://api.github.com/repos/{owner}/{repo}/releases/latest
+ * 2. Custom JSON: { version, versionCode, notes, apkUrl, ... }
  */
 export async function checkForUpdate(config: UpdateConfig): Promise<UpdateInfo | null> {
   if (!isNative()) return null;
@@ -105,14 +144,24 @@ export async function checkForUpdate(config: UpdateConfig): Promise<UpdateInfo |
   try {
     const current = await getCurrentVersion();
     const res = await fetch(config.endpoint, {
-      headers: { "Accept": "application/json" },
+      headers: { "Accept": "application/vnd.github+json" },
     });
 
     if (!res.ok) {
       throw new Error(`Update check failed: HTTP ${res.status}`);
     }
 
-    const data: UpdateInfo = await res.json();
+    const rawData = await res.json();
+
+    // Detect GitHub Releases API response vs custom JSON
+    let data: UpdateInfo;
+    if (rawData.tag_name && Array.isArray(rawData.assets)) {
+      // GitHub Releases API format
+      data = parseGitHubRelease(rawData as GitHubRelease);
+    } else {
+      // Custom JSON format
+      data = rawData as UpdateInfo;
+    }
 
     // Compare version
     const hasNewVersion = data.versionCode > current.versionCode ||

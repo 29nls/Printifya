@@ -285,64 +285,103 @@ cd android && ./gradlew assembleDebug
   sheet untuk membagikan PDF via WhatsApp, Email, Bluetooth, dll. Di web,
   fitur ini menggunakan Web Share API atau fallback ke download.
 
-### Auto-Update
+### Auto-Update (GitHub Releases)
 
-Printifya mendukung auto-update untuk aplikasi Android. Saat versi baru tersedia,
-pengguna akan melihat dialog untuk mengunduh dan menginstall update.
+Printifya mendukung auto-update untuk aplikasi Android menggunakan GitHub Releases.
+Saat versi baru tersedia, pengguna akan melihat dialog untuk mengunduh dan
+menginstall update.
 
 #### Cara Kerja
 
-1. App mengecek endpoint JSON setiap 6 jam (atau saat startup)
+1. App mengecek GitHub Releases API setiap 6 jam (atau saat startup)
 2. Jika versi baru ditemukan, dialog update muncul
 3. User klik "Update Sekarang" → APK diunduh → installer terbuka
 4. User bisa skip versi tertentu ("Nanti Saja")
 
-#### Setup Server Update
+#### Setup GitHub Releases
 
-Buat file `update.json` yang bisa diakses publik:
+**1. Update konfigurasi di `src/App.tsx`:**
 
-```json
-{
-  "version": "1.1.0",
-  "versionCode": 110,
-  "releaseDate": "2026-08-27",
-  "notes": [
-    "Fitur Auto-Update otomatis",
-    "Tombol Bagikan PDF via Android Share Sheet",
-    "Performance improvements"
-  ],
-  "apkUrl": "https://github.com/user/repo/releases/download/v1.1.0/Printifya.apk",
-  "releaseUrl": "https://github.com/user/repo/releases/tag/v1.1.0",
-  "fileSize": 7680000
-}
+```ts
+const GITHUB_OWNER = "printifya";  // Ganti dengan owner kamu
+const GITHUB_REPO = "printifya-app";  // Ganti dengan repo kamu
 ```
 
-#### Endpoint Options
+**2. Create GitHub Personal Access Token:**
 
-**GitHub Releases (Recommended)**:
-```ts
-import { githubUpdateConfig } from "./shared/autoUpdate";
+- Buka GitHub Settings → Developer Settings → Personal Access Tokens
+- Buat token baru dengan scope `repo`
+- Simpan token ini untuk digunakan saat release
 
-const config = githubUpdateConfig({
-  owner: "printifya",
-  repo: "printifya-app",
-  onUpdateAvailable: (info) => showUpdateDialog(info),
-});
+**3. Release Manual:**
+
+```bash
+# Bump version & create release
+node scripts/release.mjs 1.2.0
+
+# Atau dry-run dulu
+node scripts/release.mjs 1.2.0 --dry-run
+
+# Push tags ke GitHub
+git push && git push --tags
 ```
 
-**Custom Server**:
-```ts
-const config = {
-  endpoint: "https://api.myserver.com/updates/latest",
-  checkIntervalMs: 6 * 60 * 60 * 1000, // 6 hours
-};
+**4. Release Otomatis (GitHub Actions):**
+
+```bash
+# Create & push tag
+git tag v1.2.0
+git push origin v1.2.0
+```
+
+GitHub Actions akan otomatis:
+- Build web assets
+- Build release APK (signed)
+- Create GitHub Release dengan APK ter-attach
+
+#### Release Script
+
+| Command | Fungsi |
+|---|---|
+| `npm run release 1.2.0` | Full release (build + APK + GitHub) |
+| `npm run release:dry 1.2.0` | Dry run tanpa publish |
+
+#### Alur Auto-Update
+
+```
+GitHub Release (v1.2.0 + Printifya.apk)
+         ↓
+GitHub Releases API (latest)
+         ↓
+App Startup (setiap 6 jam)
+         ↓
+┌─────────────────────────────┐
+│ Versi Baru?                 │
+│ v1.1.0 → v1.2.0            │
+└─────────────┬───────────────┘
+              ↓ Yes
+┌─────────────────────────────┐
+│ Dialog Update Muncul        │
+│ [Update Sekarang] [Nanti]   │
+└─────────────┬───────────────┘
+              ↓ Update Sekarang
+┌─────────────────────────────┐
+│ Download APK (progress bar) │
+│ 7.3 MB — 50%               │
+└─────────────┬───────────────┘
+              ↓
+┌─────────────────────────────┐
+│ Package Installer Muncul    │
+│ [Install] [Batal]           │
+└─────────────────────────────┘
 ```
 
 #### Files
 
 | File | Fungsi |
 |---|---|
-| `src/modules/shared/autoUpdate.ts` | Core update logic |
+| `src/modules/shared/autoUpdate.ts` | Core update logic + GitHub API parser |
 | `src/components/UpdateDialog.tsx` | UI dialog |
 | `src/components/useAutoUpdate.ts` | React hook |
-| `public/update.json` | Example manifest |
+| `scripts/release.mjs` | Release automation script |
+| `.github/workflows/release.yml` | GitHub Actions workflow |

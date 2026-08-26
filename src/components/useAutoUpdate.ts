@@ -3,11 +3,14 @@ import type { UpdateInfo } from "../modules/shared/autoUpdate";
 import {
   checkForUpdate,
   shouldCheckForUpdate,
+  githubUpdateConfig,
 } from "../modules/shared/autoUpdate";
 
 interface UseAutoUpdateOptions {
-  /** Update check endpoint URL */
-  endpoint: string;
+  /** GitHub repository owner */
+  githubOwner: string;
+  /** GitHub repository name */
+  githubRepo: string;
   /** How often to auto-check (ms). Default: 6 hours */
   checkIntervalMs?: number;
   /** Whether to auto-check on mount. Default: true */
@@ -52,11 +55,18 @@ interface UseAutoUpdateReturn {
  * ```
  */
 export function useAutoUpdate(options: UseAutoUpdateOptions): UseAutoUpdateReturn {
-  const { endpoint, checkIntervalMs, autoCheck = true } = options;
+  const { githubOwner, githubRepo, checkIntervalMs, autoCheck = true } = options;
 
   const [hasUpdate, setHasUpdate] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [isChecking, setIsChecking] = useState(false);
+
+  // Create GitHub config
+  const githubConfig = githubUpdateConfig({
+    owner: githubOwner,
+    repo: githubRepo,
+    checkIntervalMs,
+  });
 
   const doCheck = useCallback(async () => {
     if (isChecking) return;
@@ -64,8 +74,7 @@ export function useAutoUpdate(options: UseAutoUpdateOptions): UseAutoUpdateRetur
 
     try {
       const info = await checkForUpdate({
-        endpoint,
-        checkIntervalMs,
+        ...githubConfig,
         onUpdateAvailable: (info) => {
           setUpdateInfo(info);
           setHasUpdate(true);
@@ -86,7 +95,7 @@ export function useAutoUpdate(options: UseAutoUpdateOptions): UseAutoUpdateRetur
     } finally {
       setIsChecking(false);
     }
-  }, [endpoint, checkIntervalMs, isChecking]);
+  }, [githubConfig, isChecking]);
 
   // Auto-check on mount
   useEffect(() => {

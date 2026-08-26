@@ -16,9 +16,10 @@ function PageLoader() {
   );
 }
 
-// Auto-update endpoint — ganti URL ini dengan endpoint server kamu
-// Format JSON: { version: "1.0.0", versionCode: 100, notes: "...", apkUrl: "..." }
-const UPDATE_ENDPOINT = "https://raw.githubusercontent.com/printifya/printifya-app/main/update.json";
+// Auto-update via GitHub Releases
+// Ganti owner/repo sesuai repository kamu
+const GITHUB_OWNER = "29nls";
+const GITHUB_REPO = "Printifya";
 
 export default function App() {
   const {
@@ -26,7 +27,10 @@ export default function App() {
     updateInfo,
     dismiss,
     onSkip,
-  } = useAutoUpdate({ endpoint: UPDATE_ENDPOINT });
+  } = useAutoUpdate({
+    githubOwner: GITHUB_OWNER,
+    githubRepo: GITHUB_REPO,
+  });
 
   return (
     <div className="app">
