@@ -1,12 +1,22 @@
 # Printifya
 
+[![GitHub Release](https://img.shields.io/github/v/release/29nls/Printifya?style=flat-square&logo=github)](https://github.com/29nls/Printifya/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/29nls/Printifya/total?style=flat-square&logo=android&color=green)](https://github.com/29nls/Printifya/releases/latest)
+[![Android](https://img.shields.io/badge/Android-7.0%2B-3DDC84?style=flat-square&logo=android)](https://github.com/29nls/Printifya/releases/latest)
+[![License](https://img.shields.io/github/license/29nls/Printifya?style=flat-square)](LICENSE)
+
 Aplikasi web cetak pas foto & dokumen: studio pas foto, editor dokumen,
-pencetakan, dan bantuan AI.
+pencetakan, dan bantuan AI. Tersedia sebagai **web app** dan **Android APK**.
 
 - **[FEATURES.md](FEATURES.md)** — matriks fitur lengkap semua modul (foto,
   dokumen, print, AI) beserta contoh nama file hasil.
+- **[CHANGELOG.md](CHANGELOG.md)** — riwayat perubahan per versi (auto-generated
+  dari conventional commits).
 - **[docs/project prd.md](docs/project%20prd.md)** — PRD (Product Requirements
   Document) proyek.
+
+> 📱 **Download APK**: [v1.0.0](https://github.com/29nls/Printifya/releases/download/v1.0.0/Printifya.apk)
+> (7.3 MB, Android 7.0+, signed release)
 
 ## Struktur Modul
 
@@ -347,6 +357,9 @@ GitHub Actions akan otomatis:
 | `npm run release:dry 1.2.0` | Dry run tanpa publish |
 | `npm run release:no-push 1.2.0` | Build + commit tanpa push |
 | `npm run release:local 1.2.0` | Build APK saja (no git, no release) |
+
+**Auto-Changelog:** Release script otomatis generate changelog dari commit messages
+(conventional commits: `feat`, `fix`, `perf`, dll) ke `CHANGELOG.md` dan GitHub Release notes.
 
 **Full release flow:**
 ```bash
