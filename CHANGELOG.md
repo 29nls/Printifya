@@ -2,6 +2,18 @@
 
 All notable changes to Printifya will be documented in this file.
 
+## 1.1.0 (2026-08-28)
+
+### 🚀 Features
+
+- **release:** add auto-changelog and improve release workflow
+
+### 📝 Documentation
+
+- expand auto-update section with check interval details
+- add release badges and download link to README
+
+
 ## 1.0.0 (2026-08-28)
 
 ### 🚀 Features
