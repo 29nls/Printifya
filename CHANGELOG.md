@@ -2,6 +2,13 @@
 
 All notable changes to Printifya will be documented in this file.
 
+## 1.1.1 (2026-08-28)
+
+### 🐛 Bug Fixes
+
+- **ci:** upgrade Node.js to v22 and sync package-lock.json
+
+
 ## 1.1.0 (2026-08-28)
 
 ### 🚀 Features
