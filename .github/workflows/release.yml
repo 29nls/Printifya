@@ -21,6 +21,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history needed for changelog generation
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -40,6 +42,44 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Get version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate changelog from commits
+        id: changelog
+        run: |
+          chmod +x scripts/generate-changelog.sh
+          bash scripts/generate-changelog.sh "${{ steps.version.outputs.version }}" \
+            --notes-file .release-notes.md
+          
+          # Save changelog for CHANGELOG.md update
+          bash scripts/generate-changelog.sh "${{ steps.version.outputs.version }}" \
+            > /tmp/changelog-entry.md
+
+      - name: Update CHANGELOG.md
+        run: |
+          if [ ! -f CHANGELOG.md ]; then
+            echo "# Changelog" > CHANGELOG.md
+            echo "" >> CHANGELOG.md
+            echo "All notable changes to Printifya will be documented in this file." >> CHANGELOG.md
+            echo "" >> CHANGELOG.md
+          fi
+          
+          # Insert new entry after header
+          HEADER_END=$(grep -n "^## " CHANGELOG.md | head -1 | cut -d: -f1 || echo "")
+          if [ -n "$HEADER_END" ]; then
+            sed -i "${HEADER_END}i\\
+          $(cat /tmp/changelog-entry.md)" CHANGELOG.md
+          else
+            cat /tmp/changelog-entry.md >> CHANGELOG.md
+          fi
+
       - name: Typecheck
         run: npm run typecheck
 
@@ -53,37 +93,36 @@ jobs:
         working-directory: android
         run: ./gradlew assembleRelease --no-daemon
 
-      - name: Get version
-        id: version
+      - name: Find APK file
+        id: apk
         run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          APK_DIR="android/app/build/outputs/apk/release"
+          # Prefer signed release over unsigned
+          APK_FILE=$(find "$APK_DIR" -name "*.apk" ! -name "*unsigned*" | head -1 || \
+                     find "$APK_DIR" -name "*.apk" | head -1)
+          
+          if [ -z "$APK_FILE" ]; then
+            echo "❌ No APK found"
+            exit 1
           fi
+          
+          # Copy to a predictable name
+          cp "$APK_FILE" "$APK_DIR/Printifya.apk"
+          echo "apk_path=$APK_DIR/Printifya.apk" >> $GITHUB_OUTPUT
+          echo "apk_name=$(basename "$APK_FILE")" >> $GITHUB_OUTPUT
+          
+          APK_SIZE=$(stat -f%z "$APK_DIR/Printifya.apk" 2>/dev/null || stat -c%s "$APK_DIR/Printifya.apk" 2>/dev/null || echo "unknown")
+          echo "apk_size=$APK_SIZE" >> $GITHUB_OUTPUT
+          echo "Found APK: $(basename "$APK_FILE") ($APK_SIZE bytes)"
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: Printifya ${{ steps.version.outputs.version }}
-          body: |
-            ## Printifya v${{ steps.version.outputs.version }}
-            
-            ### 📱 Download
-            - **APK**: Printifya.apk (Android 7.0+)
-            
-            ### 🚀 Features
-            - Auto-update support
-            - GitHub Releases integration
-            
-            ### 📋 Installation
-            1. Download `Printifya.apk` below
-            2. Open the file on your Android device
-            3. Allow installation from unknown sources if prompted
-            4. Install and enjoy!
+          body_path: .release-notes.md
           files: |
-            android/app/build/outputs/apk/release/Printifya.apk
+            ${{ steps.apk.outputs.apk_path }}
           draft: false
           prerelease: false
         env:
@@ -93,5 +132,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Printifya-${{ steps.version.outputs.version }}
-          path: android/app/build/outputs/apk/release/Printifya.apk
+          path: ${{ steps.apk.outputs.apk_path }}
           retention-days: 30
+
+      - name: Summary
+        run: |
+          echo "## ✅ Release Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **APK:** ${{ steps.apk.outputs.apk_name }} ($(( ${{ steps.apk.outputs.apk_size }} / 1048576 )) MB)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release:** [GitHub Releases](https://github.com/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.version }})" >> $GITHUB_STEP_SUMMARY
+          echo "- **Changelog:** Auto-generated from conventional commits" >> $GITHUB_STEP_SUMMARY
