@@ -2,6 +2,13 @@
 
 All notable changes to Printifya will be documented in this file.
 
+## 1.1.3 (2026-08-28)
+
+### 🐛 Bug Fixes
+
+- **ci:** rebuild package-lock.json with all esbuild optional deps
+
+
 ## 1.1.2 (2026-08-28)
 
 ### 🐛 Bug Fixes
