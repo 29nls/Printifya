@@ -303,10 +303,25 @@ menginstall update.
 
 #### Cara Kerja
 
-1. App mengecek GitHub Releases API setiap 6 jam (atau saat startup)
-2. Jika versi baru ditemukan, dialog update muncul
-3. User klik "Update Sekarang" → APK diunduh → installer terbuka
-4. User bisa skip versi tertentu ("Nanti Saja")
+1. App mengecek GitHub Releases API **saat startup** dan **setiap 6 jam**
+2. Delay 5 detik setelah startup untuk memastikan app loaded
+3. Jika versi baru ditemukan, dialog update muncul dengan:
+   - Versi saat ini → versi baru
+   - Release notes (auto-generated dari changelog)
+   - Progress bar saat download
+4. User klik **"Update Sekarang"** → APK diunduh → Android installer terbuka
+5. User bisa **skip versi** tertentu ("Nanti Saja") — versi itu tidak akan ditanya lagi
+
+#### Check Interval
+
+| Trigger | Keterangan |
+|---|---|
+| App startup | Delay 5 detik, lalu cek |
+| Setiap 6 jam | Background check otomatis |
+| Manual | User bisa pull-to-refresh (future) |
+
+> **Tip**: Update check hanya berjalan di Android (via Capacitor). Di web,
+> fitur ini tidak aktif karena tidak ada mekanisme install APK.
 
 #### Setup GitHub Releases
 
