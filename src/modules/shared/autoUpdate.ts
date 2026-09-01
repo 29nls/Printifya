@@ -4,6 +4,7 @@ import { Share } from "@capacitor/share";
 import { Preferences } from "@capacitor/preferences";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 import { Capacitor } from "@capacitor/core";
+import { ApkInstaller } from "./apkInstaller";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -27,6 +28,10 @@ export interface UpdateInfo {
 export interface UpdateConfig {
   /** Endpoint that returns JSON with UpdateInfo fields */
   endpoint: string;
+  /** GitHub owner (for constructing release URLs) */
+  githubOwner?: string;
+  /** GitHub repo name (for constructing release URLs) */
+  githubRepo?: string;
   /** How often to check (ms). Default: 6 hours */
   checkIntervalMs?: number;
   /** Skip versions equal to or older than this */
@@ -55,12 +60,18 @@ const DEFAULT_CHECK_INTERVAL = 6 * 60 * 60 * 1000; // 6 hours
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
+/**
+ * Get current app version from Capacitor.
+ * Properly extracts versionCode from build.gradle via version string.
+ */
 async function getCurrentVersion(): Promise<{ version: string; versionCode: number }> {
   try {
     const info = await App.getInfo();
+    // info.version comes from build.gradle versionName (e.g. "1.1.8")
+    // We parse versionCode from it since App.getInfo() may not expose it directly
     return {
       version: info.version,
-      versionCode: 1,
+      versionCode: parseVersionCode(info.version),
     };
   } catch {
     return { version: "0.0.0", versionCode: 0 };
@@ -99,36 +110,47 @@ interface GitHubRelease {
 // ── Main API ───────────────────────────────────────────────────────────────
 
 /**
+ * Parse version string to numeric code (e.g., "1.2.3" → 10203).
+ */
+function parseVersionCode(version: string): number {
+  const parts = version.split(".").map(Number);
+  return (parts[0] ?? 0) * 10000 + (parts[1] ?? 0) * 100 + (parts[2] ?? 0);
+}
+
+/**
  * Parse GitHub Releases API response into UpdateInfo.
  */
-function parseGitHubRelease(release: GitHubRelease): UpdateInfo {
+function parseGitHubRelease(
+  release: GitHubRelease,
+  owner?: string,
+  repo?: string,
+): UpdateInfo {
   // Extract version from tag (remove 'v' prefix)
   const version = release.tag_name.replace(/^v/i, "");
 
   // Find APK asset
-  const apkAsset = release.assets.find((a) =>
-    a.name.endsWith(".apk") && !a.name.includes("unsigned")
+  const apkAsset = release.assets.find(
+    (a) => a.name.endsWith(".apk") && !a.name.includes("unsigned"),
   );
+
+  // Build correct release URL
+  let releaseUrl: string | undefined;
+  if (owner && repo) {
+    releaseUrl = `https://github.com/${owner}/${repo}/releases/tag/${release.tag_name}`;
+  } else if (apkAsset) {
+    // Fallback: use the download URL of the APK itself
+    releaseUrl = apkAsset.browser_download_url;
+  }
 
   return {
     version,
     versionCode: parseVersionCode(version),
     notes: release.body ?? undefined,
     apkUrl: apkAsset?.browser_download_url,
-    releaseUrl: release.tag_name
-      ? `https://github.com/releases/tag/${release.tag_name}`
-      : undefined,
+    releaseUrl,
     fileSize: apkAsset?.size,
     releaseDate: release.published_at,
   };
-}
-
-/**
- * Parse version string to numeric code (e.g., "1.2.3" → 10203).
- */
-function parseVersionCode(version: string): number {
-  const parts = version.split(".").map(Number);
-  return (parts[0] ?? 0) * 10000 + (parts[1] ?? 0) * 100 + (parts[2] ?? 0);
 }
 
 /**
@@ -138,13 +160,15 @@ function parseVersionCode(version: string): number {
  * 1. GitHub Releases API (tag-based): https://api.github.com/repos/{owner}/{repo}/releases/latest
  * 2. Custom JSON: { version, versionCode, notes, apkUrl, ... }
  */
-export async function checkForUpdate(config: UpdateConfig): Promise<UpdateInfo | null> {
+export async function checkForUpdate(
+  config: UpdateConfig,
+): Promise<UpdateInfo | null> {
   if (!isNative()) return null;
 
   try {
     const current = await getCurrentVersion();
     const res = await fetch(config.endpoint, {
-      headers: { "Accept": "application/vnd.github+json" },
+      headers: { Accept: "application/vnd.github+json" },
     });
 
     if (!res.ok) {
@@ -157,14 +181,19 @@ export async function checkForUpdate(config: UpdateConfig): Promise<UpdateInfo |
     let data: UpdateInfo;
     if (rawData.tag_name && Array.isArray(rawData.assets)) {
       // GitHub Releases API format
-      data = parseGitHubRelease(rawData as GitHubRelease);
+      data = parseGitHubRelease(
+        rawData as GitHubRelease,
+        config.githubOwner,
+        config.githubRepo,
+      );
     } else {
       // Custom JSON format
       data = rawData as UpdateInfo;
     }
 
     // Compare version
-    const hasNewVersion = data.versionCode > current.versionCode ||
+    const hasNewVersion =
+      data.versionCode > current.versionCode ||
       compareVersions(data.version, current.version) > 0;
 
     if (!hasNewVersion) {
@@ -173,7 +202,9 @@ export async function checkForUpdate(config: UpdateConfig): Promise<UpdateInfo |
     }
 
     // Check if user skipped this version
-    const skipped = await Preferences.get({ key: STORAGE_KEY_SKIPPED_VERSION });
+    const skipped = await Preferences.get({
+      key: STORAGE_KEY_SKIPPED_VERSION,
+    });
     if (skipped.value === data.version) {
       config.onNoUpdate?.();
       return null;
@@ -197,7 +228,9 @@ export async function checkForUpdate(config: UpdateConfig): Promise<UpdateInfo |
 /**
  * Check if enough time has passed since the last check.
  */
-export async function shouldCheckForUpdate(intervalMs: number = DEFAULT_CHECK_INTERVAL): Promise<boolean> {
+export async function shouldCheckForUpdate(
+  intervalMs: number = DEFAULT_CHECK_INTERVAL,
+): Promise<boolean> {
   const last = await Preferences.get({ key: STORAGE_KEY_LAST_CHECK });
   if (!last.value) return true;
   const lastTime = parseInt(last.value, 10);
@@ -225,7 +258,7 @@ export async function clearSkippedVersion(): Promise<void> {
 export async function downloadApk(
   url: string,
   filename: string,
-  onProgress?: (progress: DownloadProgress) => void
+  onProgress?: (progress: DownloadProgress) => void,
 ): Promise<string> {
   // Use XMLHttpRequest for progress tracking
   return new Promise((resolve, reject) => {
@@ -291,32 +324,54 @@ export async function downloadApk(
 
 /**
  * Prompt user to install the downloaded APK.
- * On Android, this triggers the package installer.
+ * Uses native ApkInstaller plugin on Android for direct package installer.
  */
 export async function promptInstall(filePath: string): Promise<void> {
-  try {
-    // Get the file URI
-    const fileUri = await Filesystem.getUri({
-      path: filePath,
-      directory: Directory.Cache,
-    });
-
-    // On Android, open the APK file URI which triggers package installer
-    // The intent filter for application/vnd.android.package-archive
-    // is handled by the Android OS
-    await Browser.open({ url: fileUri.uri });
-  } catch {
-    // Fallback: share the file via Android share sheet
+  if (isNative()) {
     try {
-      await Share.share({
-        title: "Install Printifya",
-        text: "Buka file APK untuk install Printifya versi baru",
-        files: [filePath],
+      // Get the full filesystem URI for the APK
+      const fileUri = await Filesystem.getUri({
+        path: filePath,
+        directory: Directory.Cache,
       });
+
+      // Use native plugin to open the APK with Android package installer
+      await ApkInstaller.installApk({ path: fileUri.uri });
+      return;
     } catch {
-      throw new Error("Gagal membuka file APK. Coba buka file secara manual.");
+      // Fallback: try with direct path
+      try {
+        const fileInfo = await Filesystem.stat({
+          path: filePath,
+          directory: Directory.Cache,
+        });
+        if (fileInfo && fileInfo.uri) {
+          await ApkInstaller.installApk({ path: fileInfo.uri });
+          return;
+        }
+      } catch {
+        // Continue to share fallback
+      }
+
+      // Fallback: share the APK via Android share sheet
+      try {
+        await Share.share({
+          title: "Install Printifya",
+          text: "Buka file APK untuk install Printifya versi baru",
+          files: [filePath],
+        });
+        return;
+      } catch {
+        // Last resort: open release page
+        throw new Error(
+          "Gagal membuka installer. Coba download APK dari halaman release.",
+        );
+      }
     }
   }
+
+  // Web fallback: nothing to do
+  throw new Error("Auto-update hanya tersedia di aplikasi Android");
 }
 
 /**
@@ -324,14 +379,18 @@ export async function promptInstall(filePath: string): Promise<void> {
  */
 export async function performUpdate(
   updateInfo: UpdateInfo,
-  onProgress?: (progress: DownloadProgress) => void
+  onProgress?: (progress: DownloadProgress) => void,
 ): Promise<void> {
   const filename = `printifya-${updateInfo.version}.apk`;
 
   if (updateInfo.apkUrl) {
     // Download APK
     onProgress?.({ loaded: 0, total: 1, percent: 0 });
-    const filePath = await downloadApk(updateInfo.apkUrl, filename, onProgress);
+    const filePath = await downloadApk(
+      updateInfo.apkUrl,
+      filename,
+      onProgress,
+    );
     onProgress?.({ loaded: 1, total: 1, percent: 100 });
 
     // Prompt install
@@ -347,7 +406,9 @@ export async function performUpdate(
 /**
  * Auto-check for update on app startup (call once).
  */
-export async function autoCheckForUpdate(config: UpdateConfig): Promise<void> {
+export async function autoCheckForUpdate(
+  config: UpdateConfig,
+): Promise<void> {
   if (!isNative()) return;
 
   const checkInterval = config.checkIntervalMs ?? DEFAULT_CHECK_INTERVAL;
@@ -365,19 +426,6 @@ export async function autoCheckForUpdate(config: UpdateConfig): Promise<void> {
 
 /**
  * Create an update config for GitHub Releases.
- *
- * @example
- * ```ts
- * import { autoCheckForUpdate, githubUpdateConfig } from "./shared/autoUpdate";
- *
- * const config = githubUpdateConfig({
- *   owner: "printifya",
- *   repo: "printifya-app",
- *   onUpdateAvailable: (info) => showUpdateDialog(info),
- * });
- *
- * autoCheckForUpdate(config);
- * ```
  */
 export function githubUpdateConfig(opts: {
   owner: string;
@@ -389,6 +437,8 @@ export function githubUpdateConfig(opts: {
 }): UpdateConfig {
   return {
     endpoint: `https://api.github.com/repos/${opts.owner}/${opts.repo}/releases/latest`,
+    githubOwner: opts.owner,
+    githubRepo: opts.repo,
     checkIntervalMs: opts.checkIntervalMs,
     onUpdateAvailable: opts.onUpdateAvailable,
     onNoUpdate: opts.onNoUpdate,

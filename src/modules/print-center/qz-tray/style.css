@@ -35,7 +35,7 @@
 
 .qz-connected .qz-dot {
   background: #22c55e;
-  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.18);
+  outline: 2px solid #40c057; outline-offset: 1px;
 }
 
 .qz-connecting .qz-dot {
@@ -45,7 +45,7 @@
 
 .qz-error .qz-dot {
   background: #ef4444;
-  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.18);
+  outline: 2px solid #e03131; outline-offset: 1px;
 }
 
 @keyframes qz-pulse {

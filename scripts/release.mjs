@@ -235,7 +235,7 @@ async function release() {
   // 11. GitHub Release (CI handles this automatically via GitHub Actions)
   if (!localOnly && !dryRun && !noPush) {
     console.log("\n🌐 GitHub Release will be created automatically by CI...");
-    console.log(`   Tag ${tag} pushed → CI triggers release workflow");
+    console.log(`   Tag ${tag} pushed → CI triggers release workflow`);
     console.log(`   Release URL: https://github.com/29nls/Printifya/releases/tag/${tag}`);
   }
 

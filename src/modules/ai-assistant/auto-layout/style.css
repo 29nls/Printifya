@@ -60,7 +60,7 @@
 .photo-booth-text-input:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
+  outline: 2px solid var(--accent); outline-offset: 1px;
 }
 
 .photo-forward {
@@ -78,7 +78,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border);
   transition: background 0.15s;
 }
 
@@ -126,7 +126,7 @@
 .sheet-settings input[type="text"]:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
+  outline: 2px solid var(--accent); outline-offset: 1px;
 }
 
 .booth-text-hint {

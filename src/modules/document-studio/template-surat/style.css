@@ -84,7 +84,7 @@
 .form-field textarea:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
+  outline: 2px solid var(--accent); outline-offset: 1px;
 }
 
 .form-row {
@@ -142,7 +142,7 @@
   min-height: 842px;
   background: #fff;
   padding: 48px 42px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  border: 1px solid var(--border);
   transform: scale(0.72);
   transform-origin: top left;
   font-family: "Times New Roman", Georgia, serif;

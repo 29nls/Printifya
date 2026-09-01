@@ -111,7 +111,7 @@
 .seg-erode input[type="number"]:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
+  outline: 2px solid var(--accent); outline-offset: 1px;
 }
 
 /* ---------- Status proses ---------- */

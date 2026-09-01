@@ -7,8 +7,7 @@ export default function Home() {
       <header className="hero">
         <h1>Printifya</h1>
         <p>
-          Studio pas foto, editor dokumen, dan pencetakan — dalam satu aplikasi
-          web.
+          Pas foto, dokumen, dan pencetakan — langsung dari aplikasi.
         </p>
       </header>
 
@@ -18,7 +17,7 @@ export default function Home() {
             <span className="card-icon">{m.icon}</span>
             <h3>{m.title}</h3>
             <p>{m.description}</p>
-            <span className="card-cta">Buka modul →</span>
+            <span className="card-cta">Buka →</span>
           </Link>
         ))}
       </div>

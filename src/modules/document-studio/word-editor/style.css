@@ -23,7 +23,7 @@
 .word-title-input:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
+  outline: 2px solid var(--accent); outline-offset: 1px;
 }
 
 .word-actions {
@@ -109,7 +109,7 @@
   padding: 48px 56px;
   border-radius: 4px;
   border: 1px solid var(--border);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--border);
   font-family: Georgia, "Times New Roman", serif;
   font-size: 12pt;
   line-height: 1.6;
@@ -118,7 +118,7 @@
 }
 
 .editor-page:focus-visible {
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1), 0 0 0 3px rgba(79, 70, 229, 0.25);
+  border: 1px solid var(--border);
 }
 
 .editor-page:empty::before {

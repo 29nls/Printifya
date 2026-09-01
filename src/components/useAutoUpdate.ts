@@ -1,4 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { App } from "@capacitor/app";
+import { Capacitor } from "@capacitor/core";
 import type { UpdateInfo } from "../modules/shared/autoUpdate";
 import {
   checkForUpdate,
@@ -22,6 +24,8 @@ interface UseAutoUpdateReturn {
   hasUpdate: boolean;
   /** The update info (if available) */
   updateInfo: UpdateInfo | null;
+  /** Current app version */
+  currentVersion: string;
   /** Whether currently checking for updates */
   isChecking: boolean;
   /** Manually trigger a check */
@@ -32,41 +36,39 @@ interface UseAutoUpdateReturn {
   onSkip: () => void;
 }
 
-/**
- * React hook for managing app auto-update flow.
- *
- * @example
- * ```tsx
- * const { hasUpdate, updateInfo, checkNow, dismiss } = useAutoUpdate({
- *   endpoint: "https://api.example.com/updates/latest",
- * });
- *
- * return (
- *   <>
- *     {hasUpdate && updateInfo && (
- *       <UpdateDialog
- *         updateInfo={updateInfo}
- *         onDismiss={dismiss}
- *         onSkip={dismiss}
- *       />
- *     )}
- *   </>
- * );
- * ```
- */
 export function useAutoUpdate(options: UseAutoUpdateOptions): UseAutoUpdateReturn {
   const { githubOwner, githubRepo, checkIntervalMs, autoCheck = true } = options;
 
   const [hasUpdate, setHasUpdate] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [currentVersion, setCurrentVersion] = useState("0.0.0");
   const [isChecking, setIsChecking] = useState(false);
 
-  // Create GitHub config
-  const githubConfig = githubUpdateConfig({
-    owner: githubOwner,
-    repo: githubRepo,
-    checkIntervalMs,
-  });
+  // Memoize the GitHub config so it doesn't change every render
+  const githubConfig = useMemo(
+    () =>
+      githubUpdateConfig({
+        owner: githubOwner,
+        repo: githubRepo,
+        checkIntervalMs,
+      }),
+    [githubOwner, githubRepo, checkIntervalMs],
+  );
+
+  // Fetch current app version on mount
+  useEffect(() => {
+    async function loadVersion() {
+      try {
+        if (Capacitor.isNativePlatform()) {
+          const info = await App.getInfo();
+          setCurrentVersion(info.version);
+        }
+      } catch {
+        // Keep default
+      }
+    }
+    loadVersion();
+  }, []);
 
   const doCheck = useCallback(async () => {
     if (isChecking) return;
@@ -101,18 +103,22 @@ export function useAutoUpdate(options: UseAutoUpdateOptions): UseAutoUpdateRetur
   useEffect(() => {
     if (!autoCheck) return;
 
+    let timer: ReturnType<typeof setTimeout>;
     const init = async () => {
       const shouldCheck = await shouldCheckForUpdate(checkIntervalMs);
       if (shouldCheck) {
         // Delay initial check by 5 seconds
-        const timer = setTimeout(() => {
+        timer = setTimeout(() => {
           doCheck();
         }, 5000);
-        return () => clearTimeout(timer);
       }
     };
 
     init();
+
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
   }, [autoCheck, checkIntervalMs, doCheck]);
 
   const dismiss = useCallback(() => {
@@ -128,6 +134,7 @@ export function useAutoUpdate(options: UseAutoUpdateOptions): UseAutoUpdateRetur
   return {
     hasUpdate,
     updateInfo,
+    currentVersion,
     isChecking,
     checkNow: doCheck,
     dismiss,

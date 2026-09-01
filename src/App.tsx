@@ -1,12 +1,11 @@
-import { Suspense } from "react";
-import { Navigate, NavLink, Route, Routes } from "react-router-dom";
+import { Suspense, useState, useCallback, useEffect } from "react";
+import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { LEAF_MODULES, MODULES } from "./modules/registry";
 import ModuleErrorBoundary from "./components/ModuleErrorBoundary";
 import Home from "./pages/Home";
 import { useAutoUpdate } from "./components/useAutoUpdate";
 import UpdateDialog from "./components/UpdateDialog";
 
-/** Fallback singkat saat chunk modul sedang diunduh (lazy load). */
 function PageLoader() {
   return (
     <div className="page-loader">
@@ -16,62 +15,84 @@ function PageLoader() {
   );
 }
 
-// Auto-update via GitHub Releases
-// Ganti owner/repo sesuai repository kamu
 const GITHUB_OWNER = "29nls";
 const GITHUB_REPO = "Printifya";
 
 export default function App() {
-  const {
-    hasUpdate,
-    updateInfo,
-    dismiss,
-    onSkip,
-  } = useAutoUpdate({
-    githubOwner: GITHUB_OWNER,
-    githubRepo: GITHUB_REPO,
-  });
+  const { hasUpdate, updateInfo, currentVersion, dismiss, onSkip } =
+    useAutoUpdate({ githubOwner: GITHUB_OWNER, githubRepo: GITHUB_REPO });
+
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const location = useLocation();
+
+  // Close sidebar on route change (mobile)
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [location.pathname]);
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarOpen((v) => !v);
+  }, []);
+
+  const closeSidebar = useCallback(() => {
+    setSidebarOpen(false);
+  }, []);
 
   return (
     <div className="app">
-      <aside className="sidebar">
+      <button
+        className="menu-toggle"
+        onClick={toggleSidebar}
+        aria-label="Toggle menu"
+      >
+        {sidebarOpen ? "✕" : "☰"}
+      </button>
+
+      <div
+        className={`sidebar-overlay${sidebarOpen ? " visible" : ""}`}
+        onClick={closeSidebar}
+      />
+
+      <aside className={`sidebar${sidebarOpen ? " open" : ""}`}>
         <div className="brand">
-          <span>🖨️</span>
-          <span>Printifya</span>
+          <div className="brand-icon">P</div>
+          <span className="brand-name">Printifya</span>
         </div>
 
-        <nav className="nav">
-          <NavLink
-            to="/"
-            end
-            className={({ isActive }) =>
-              isActive ? "nav-link active" : "nav-link"
-            }
-          >
-            🏠 Beranda
-          </NavLink>
+        <div className="sidebar-scroll">
+          <nav className="nav">
+            <NavLink
+              to="/"
+              end
+              className={({ isActive }) =>
+                isActive ? "nav-link active" : "nav-link"
+              }
+            >
+              Beranda
+            </NavLink>
 
-          {MODULES.map((m) => (
-            <div className="nav-group" key={m.id}>
-              <div className="nav-group-title">
-                <span>{m.icon}</span>
-                <span>{m.title}</span>
+            {MODULES.map((m) => (
+              <div className="nav-group" key={m.id}>
+                <div className="nav-group-title">
+                  <span>{m.icon}</span>
+                  <span>{m.title}</span>
+                </div>
+                {m.children?.map((c) => (
+                  <NavLink
+                    key={c.id}
+                    to={c.path}
+                    className={({ isActive }) =>
+                      isActive ? "nav-link active" : "nav-link"
+                    }
+                  >
+                    <span>{c.icon}</span>
+                    <span>{c.title}</span>
+                  </NavLink>
+                ))}
               </div>
-              {m.children?.map((c) => (
-                <NavLink
-                  key={c.id}
-                  to={c.path}
-                  className={({ isActive }) =>
-                    isActive ? "nav-link active" : "nav-link"
-                  }
-                >
-                  <span>{c.icon}</span>
-                  <span>{c.title}</span>
-                </NavLink>
-              ))}
-            </div>
-          ))}
-        </nav>
+            ))}
+          </nav>
+        </div>
       </aside>
 
       <main className="content">
@@ -112,10 +133,10 @@ export default function App() {
         </Suspense>
       </main>
 
-      {/* Auto-update dialog */}
       {hasUpdate && updateInfo && (
         <UpdateDialog
           updateInfo={updateInfo}
+          currentVersion={currentVersion}
           onDismiss={dismiss}
           onSkip={onSkip}
         />

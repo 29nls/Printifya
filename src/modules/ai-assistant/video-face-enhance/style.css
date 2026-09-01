@@ -91,7 +91,7 @@
   white-space: nowrap;
   padding: 4px 9px;
   border-radius: 6px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.12s ease;
@@ -119,7 +119,7 @@
 /* Sedang memutar (klik untuk cek cepat): bar menyala, bingkai diberi aksen. */
 .waveform.playing {
   border-color: var(--accent);
-  box-shadow: 0 0 5px var(--accent);
+  outline: 2px solid var(--accent); outline-offset: 1px;
 }
 
 .waveform.playing .wave-bar {
