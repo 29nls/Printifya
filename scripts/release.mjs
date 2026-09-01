@@ -232,22 +232,11 @@ async function release() {
     console.log("\n  [dry-run] Would create tag:", tag);
   }
 
-  // 11. GitHub Release
+  // 11. GitHub Release (CI handles this automatically via GitHub Actions)
   if (!localOnly && !dryRun && !noPush) {
-    const ghAvailable = cmdExists("gh");
-    if (ghAvailable) {
-      console.log("\n🐙 Creating GitHub Release...");
-      if (existsSync(notesPath) && apkPath) {
-        runVerbose(`gh release create ${tag} "${apkPath}" --title "Printifya ${version}" --notes-file "${notesPath}"`);
-      } else {
-        const notes = `Printifya v${version} — Signed release APK.`;
-        runVerbose(`gh release create ${tag} "${apkPath}" --title "Printifya ${version}" --notes "${notes}"`);
-      }
-    } else {
-      console.log("\n⚠️  gh CLI not found. Create release manually:");
-      console.log(`   gh auth login`);
-      console.log(`   gh release create ${tag} "${apkPath}" --title "Printifya ${version}" --notes-file ".release-notes.md"`);
-    }
+    console.log("\n🌐 GitHub Release will be created automatically by CI...");
+    console.log(`   Tag ${tag} pushed → CI triggers release workflow");
+    console.log(`   Release URL: https://github.com/29nls/Printifya/releases/tag/${tag}`);
   }
 
   // 12. Cleanup
