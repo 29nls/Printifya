@@ -2,6 +2,28 @@
 
 All notable changes to Printifya will be documented in this file.
 
+## 1.1.8 (2026-09-01)
+
+### 🐛 Bug Fixes
+
+- **release:** let CI create GitHub Release to avoid duplicate assets
+
+### ⚡ Performance
+
+- **android:** enable R8 minification and resource shrinking
+
+
+## 1.1.8 (2026-09-01)
+
+### 🐛 Bug Fixes
+
+- **release:** let CI create GitHub Release to avoid duplicate assets
+
+### ⚡ Performance
+
+- **android:** enable R8 minification and resource shrinking
+
+
 ## 1.1.7 (2026-09-01)
 
 ### 🐛 Bug Fixes
