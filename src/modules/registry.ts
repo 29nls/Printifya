@@ -40,7 +40,6 @@ const SlideshowToVideoPage = lazy(() => import("./ai-assistant/slideshow-to-vide
 
 // Tools (Fitur Cepat)
 const ScanPage = lazy(() => import("./scan"));
-const CopyModePage = lazy(() => import("./copy-mode"));
 const QuickTemplatesPage = lazy(() => import("./quick-templates"));
 const QRGeneratorPage = lazy(() => import("./qr-generator"));
 const PrintHistoryPage = lazy(() => import("./print-history"));
@@ -289,7 +288,7 @@ export const MODULES: Module[] = [
     path: "/tools",
     icon: "⚡",
     description:
-      "Alat cetak cepat: scan dokumen, fotokopi, template siap pakai, QR code, dan riwayat cetak.",
+      "Alat cetak cepat: scan dokumen, template siap pakai, QR code, dan riwayat cetak.",
     Component: null as unknown as ComponentType,
     children: [
       {
@@ -301,15 +300,7 @@ export const MODULES: Module[] = [
           "Foto dokumen → detect tepi otomatis → luruskan (perspective transform) → bersihkan → simpan PDF/PNG.",
         Component: ScanPage,
       },
-      {
-        id: "copy-mode",
-        title: "Mode Fotokopi",
-        path: "/tools/copy",
-        icon: "📋",
-        description:
-          "Foto dokumen → pilih jumlah salinan → susun di sheet → cetak atau ekspor PDF.",
-        Component: CopyModePage,
-      },
+
       {
         id: "quick-templates",
         title: "Template Cepat",
