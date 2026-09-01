@@ -2,6 +2,23 @@
 
 All notable changes to Printifya will be documented in this file.
 
+## 1.4.0 (2026-09-01)
+
+### 🚀 Features
+
+- **sidebar:** add search to filter 29 leaf modules by name
+- **home:** redesign Home page as a quick-action dashboard
+
+### 🐛 Bug Fixes
+
+- **qr:** replace fake QR placeholder with real qrcode library
+
+### ♻️  Refactors
+
+- **photo-studio:** use direct import for factory-generated pas-foto pages
+- **photo-studio:** collapse 3 pas-foto modules into factory
+
+
 ## 1.3.1 (2026-09-01)
 
 ### 🐛 Bug Fixes
