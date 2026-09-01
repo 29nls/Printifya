@@ -60,8 +60,37 @@ body {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 16px 12px;
+  padding: 12px;
   -webkit-overflow-scrolling: touch;
+}
+
+/* Sidebar Search */
+
+.sidebar-search {
+  margin-bottom: 8px;
+}
+
+.sidebar-search-input {
+  width: 100%;
+  padding: 7px 10px 7px 30px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--surface);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%236b7280' viewBox='0 0 24 24'%3E%3Cpath d='M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z' stroke='%236b7280' stroke-width='2' stroke-linecap='round' fill='none'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: 8px center;
+  transition: border-color 0.1s;
+}
+
+.sidebar-search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.sidebar-search-input::placeholder {
+  color: var(--text-muted);
 }
 
 /* Brand */

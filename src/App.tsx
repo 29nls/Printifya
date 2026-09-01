@@ -23,12 +23,26 @@ export default function App() {
     useAutoUpdate({ githubOwner: GITHUB_OWNER, githubRepo: GITHUB_REPO });
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const location = useLocation();
 
-  // Close sidebar on route change (mobile)
+  // Close sidebar and clear search on route change (mobile)
   useEffect(() => {
     setSidebarOpen(false);
+    setSearchQuery("");
   }, [location.pathname]);
+
+  // Filter modules by search query
+  const filteredModules = searchQuery.trim()
+    ? MODULES.map((m) => ({
+        ...m,
+        children: m.children?.filter(
+          (c) =>
+            c.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            c.description.toLowerCase().includes(searchQuery.toLowerCase()),
+        ),
+      })).filter((m) => m.children && m.children.length > 0)
+    : MODULES;
 
   const toggleSidebar = useCallback(() => {
     setSidebarOpen((v) => !v);
@@ -60,6 +74,16 @@ export default function App() {
         </div>
 
         <div className="sidebar-scroll">
+          <div className="sidebar-search">
+            <input
+              type="text"
+              placeholder="Cari modul…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="sidebar-search-input"
+            />
+          </div>
+
           <nav className="nav">
             <NavLink
               to="/"
@@ -71,7 +95,7 @@ export default function App() {
               Beranda
             </NavLink>
 
-            {MODULES.map((m) => (
+            {filteredModules.map((m) => (
               <div className="nav-group" key={m.id}>
                 <div className="nav-group-title">
                   <span>{m.icon}</span>
