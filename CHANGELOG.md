@@ -2,6 +2,17 @@
 
 All notable changes to Printifya will be documented in this file.
 
+## 1.3.1 (2026-09-01)
+
+### 🐛 Bug Fixes
+
+- downloadApk — replace XHR with fetch to fix Android network error
+
+### ♻️  Refactors
+
+- remove Copy Mode — overlaps with Auto Layout
+
+
 ## 1.3.0 (2026-09-01)
 
 ### 🚀 Features
