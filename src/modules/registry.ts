@@ -9,10 +9,8 @@ const DocumentStudioPage = lazy(() => import("./document-studio"));
 const PrintCenterPage = lazy(() => import("./print-center"));
 const AiAssistantPage = lazy(() => import("./ai-assistant"));
 
-// Photo Studio
-const PasFoto2x3Page = lazy(() => import("./photo-studio/pas-foto-2x3"));
-const PasFoto3x4Page = lazy(() => import("./photo-studio/pas-foto-3x4"));
-const PasFoto4x6Page = lazy(() => import("./photo-studio/pas-foto-4x6"));
+// Photo Studio (pas-foto pages are factory-generated, one import for all 3)
+import { PasFoto2x3Page, PasFoto3x4Page, PasFoto4x6Page } from "./photo-studio/shared/pasFotoPages";
 const VisaPhotoPage = lazy(() => import("./photo-studio/visa-photo"));
 const CustomSizePage = lazy(() => import("./photo-studio/custom-size"));
 
