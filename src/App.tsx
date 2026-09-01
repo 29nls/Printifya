@@ -19,7 +19,7 @@ const GITHUB_OWNER = "29nls";
 const GITHUB_REPO = "Printifya";
 
 export default function App() {
-  const { hasUpdate, updateInfo, currentVersion, dismiss, onSkip } =
+  const { hasUpdate, updateInfo, currentVersion, isChecking, checkNow, dismiss, onSkip } =
     useAutoUpdate({ githubOwner: GITHUB_OWNER, githubRepo: GITHUB_REPO });
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -92,6 +92,22 @@ export default function App() {
               </div>
             ))}
           </nav>
+        </div>
+
+        <div className="sidebar-footer">
+          <span className="sidebar-version">v{currentVersion}</span>
+          <button
+            className="sidebar-check-btn"
+            onClick={checkNow}
+            disabled={isChecking}
+          >
+            {isChecking ? (
+              <span className="spinner-inline" />
+            ) : (
+              "🔄"
+            )}
+            {isChecking ? "Memeriksa…" : "Periksa Update"}
+          </button>
         </div>
       </aside>
 
