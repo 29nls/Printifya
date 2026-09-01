@@ -38,6 +38,13 @@ const FaceEnhancePage = lazy(() => import("./ai-assistant/face-enhance"));
 const VideoFaceEnhancePage = lazy(() => import("./ai-assistant/video-face-enhance"));
 const SlideshowToVideoPage = lazy(() => import("./ai-assistant/slideshow-to-video"));
 
+// Tools (Fitur Cepat)
+const ScanPage = lazy(() => import("./scan"));
+const CopyModePage = lazy(() => import("./copy-mode"));
+const QuickTemplatesPage = lazy(() => import("./quick-templates"));
+const QRGeneratorPage = lazy(() => import("./qr-generator"));
+const PrintHistoryPage = lazy(() => import("./print-history"));
+
 export interface Module {
   id: string;
   title: string;
@@ -273,6 +280,62 @@ export const MODULES: Module[] = [
         description:
           "Susun beberapa foto menjadi video WebM dengan transisi fade — musik latar opsional (loop) via recordWithAudio, pratinjau real-time, pengaturan tersimpan dengan tombol reset.",
         Component: SlideshowToVideoPage,
+      },
+    ],
+  },
+  {
+    id: "tools",
+    title: "Fitur Cepat",
+    path: "/tools",
+    icon: "⚡",
+    description:
+      "Alat cetak cepat: scan dokumen, fotokopi, template siap pakai, QR code, dan riwayat cetak.",
+    Component: null as unknown as ComponentType,
+    children: [
+      {
+        id: "scan",
+        title: "Scan & Digitize",
+        path: "/tools/scan",
+        icon: "📷",
+        description:
+          "Foto dokumen → detect tepi otomatis → luruskan (perspective transform) → bersihkan → simpan PDF/PNG.",
+        Component: ScanPage,
+      },
+      {
+        id: "copy-mode",
+        title: "Mode Fotokopi",
+        path: "/tools/copy",
+        icon: "📋",
+        description:
+          "Foto dokumen → pilih jumlah salinan → susun di sheet → cetak atau ekspor PDF.",
+        Component: CopyModePage,
+      },
+      {
+        id: "quick-templates",
+        title: "Template Cepat",
+        path: "/tools/templates",
+        icon: "📑",
+        description:
+          "Template siap pakai: kwitansi, surat pernyataan, surat domisili, label, formulir biodata, bon.",
+        Component: QuickTemplatesPage,
+      },
+      {
+        id: "qr-generator",
+        title: "QR Code",
+        path: "/tools/qr",
+        icon: "📱",
+        description:
+          "Buat QR code untuk WiFi, link, atau teks — unduh PNG atau cetak langsung.",
+        Component: QRGeneratorPage,
+      },
+      {
+        id: "print-history",
+        title: "Riwayat Cetak",
+        path: "/tools/history",
+        icon: "📊",
+        description:
+          "Lihat riwayat dokumen yang sudah dicetak, statistik pemakaian, dan cetak ulang.",
+        Component: PrintHistoryPage,
       },
     ],
   },
