@@ -2,6 +2,13 @@
 
 All notable changes to Printifya will be documented in this file.
 
+## 1.3.0 (2026-09-01)
+
+### 🚀 Features
+
+- add 5 new tools — Scan, Copy Mode, Templates, QR Code, History
+
+
 ## 1.2.3 (2026-09-01)
 
 ### 🐛 Bug Fixes
