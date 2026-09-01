@@ -2,6 +2,13 @@
 
 All notable changes to Printifya will be documented in this file.
 
+## 1.1.5 (2026-09-01)
+
+### 🐛 Bug Fixes
+
+- **ci:** replace broken sed with temp-file approach for CHANGELOG
+
+
 ## 1.1.4 (2026-09-01)
 
 ### 🐛 Bug Fixes
