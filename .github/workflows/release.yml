@@ -71,14 +71,16 @@ jobs:
             echo "" >> CHANGELOG.md
           fi
           
-          # Insert new entry after header
-          HEADER_END=$(grep -n "^## " CHANGELOG.md | head -1 | cut -d: -f1 || echo "")
-          if [ -n "$HEADER_END" ]; then
-            sed -i "${HEADER_END}i\\
-          $(cat /tmp/changelog-entry.md)" CHANGELOG.md
-          else
-            cat /tmp/changelog-entry.md >> CHANGELOG.md
-          fi
+          # Prepend new entry after header using temp file
+          ENTRY=$(cat /tmp/changelog-entry.md)
+          HEADER="# Changelog\n\nAll notable changes to Printifya will be documented in this file.\n\n"
+          REMAINDER=$(sed '1,4d' CHANGELOG.md)
+          {
+            printf "# Changelog\n\n"
+            echo "$ENTRY"
+            echo "$REMAINDER"
+          } > CHANGELOG.md.tmp
+          mv CHANGELOG.md.tmp CHANGELOG.md
 
       - name: Typecheck
         run: npm run typecheck
