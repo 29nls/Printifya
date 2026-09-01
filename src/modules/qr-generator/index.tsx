@@ -1,11 +1,16 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useCallback } from "react";
+import QRCode from "qrcode";
 import "./style.css";
 
-/** Simple QR Code generator using canvas — no external dependencies.
- *  Generates a QR-code-like matrix for short strings. For production,
- *  use a real QR library; this is a visual placeholder. */
-
 type QRMode = "text" | "wifi" | "link";
+type ECLevel = "L" | "M" | "Q" | "H";
+
+const EC_LABELS: Record<ECLevel, string> = {
+  L: "Rendah (7%)",
+  M: "Sedang (15%)",
+  Q: "Tinggi (25%)",
+  H: "Tertinggi (30%)",
+};
 
 export default function QRGeneratorPage() {
   const [mode, setMode] = useState<QRMode>("text");
@@ -14,12 +19,13 @@ export default function QRGeneratorPage() {
   const [wifiPass, setWifiPass] = useState("");
   const [wifiHidden, setWifiHidden] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
+  const [ecLevel, setEcLevel] = useState<ECLevel>("M");
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [generating, setGenerating] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  /** Build the QR string based on mode */
-  const buildPayload = (): string => {
+  const buildPayload = useCallback((): string => {
     switch (mode) {
       case "wifi":
         return `WIFI:T:WPA;S:${wifiSsid};P:${wifiPass};${wifiHidden ? "H:true;" : ""};`;
@@ -29,125 +35,52 @@ export default function QRGeneratorPage() {
       default:
         return textInput;
     }
-  };
+  }, [mode, textInput, wifiSsid, wifiPass, wifiHidden, linkUrl]);
 
-  /** Generate a simple matrix pattern (visual placeholder — not a real QR).
-   *  Replace with qrcode library for real QR output. */
-  const generateMatrix = (payload: string): boolean[][] => {
-    const size = 25; // 25×25 matrix
-    const matrix: boolean[][] = Array.from({ length: size }, () =>
-      new Array(size).fill(false),
-    );
-
-    // Finder patterns (top-left, top-right, bottom-left)
-    const drawFinder = (r: number, c: number) => {
-      for (let dr = 0; dr < 7; dr++) {
-        for (let dc = 0; dc < 7; dc++) {
-          const isEdge = dr === 0 || dr === 6 || dc === 0 || dc === 6;
-          const isInner = dr >= 2 && dr <= 4 && dc >= 2 && dc <= 4;
-          matrix[r + dr][c + dc] = isEdge || isInner;
-        }
-      }
-    };
-
-    drawFinder(0, 0);
-    drawFinder(0, size - 7);
-    drawFinder(size - 7, 0);
-
-    // Timing patterns
-    for (let i = 8; i < size - 8; i++) {
-      matrix[6][i] = i % 2 === 0;
-      matrix[i][6] = i % 2 === 0;
-    }
-
-    // Data encoding (simple hash-based fill)
-    let hash = 0;
-    for (let i = 0; i < payload.length; i++) {
-      hash = ((hash << 5) - hash + payload.charCodeAt(i)) | 0;
-    }
-
-    let seed = Math.abs(hash);
-    const nextRand = () => {
-      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-      return seed;
-    };
-
-    for (let r = 0; r < size; r++) {
-      for (let c = 0; c < size; c++) {
-        // Skip finder patterns and timing
-        if (
-          (r < 9 && c < 9) ||
-          (r < 9 && c >= size - 8) ||
-          (r >= size - 8 && c < 9) ||
-          r === 6 ||
-          c === 6
-        ) continue;
-
-        if (!matrix[r][c]) {
-          matrix[r][c] = nextRand() % 3 !== 0;
-        }
-      }
-    }
-
-    return matrix;
-  };
-
-  /** Draw matrix to canvas */
-  const drawQR = (matrix: boolean[][]) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const size = matrix.length;
-    const padding = 4; // modules of quiet zone
-    const moduleSize = 10;
-    const totalSize = (size + padding * 2) * moduleSize;
-
-    canvas.width = totalSize;
-    canvas.height = totalSize;
-    const ctx = canvas.getContext("2d")!;
-
-    // White background
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, totalSize, totalSize);
-
-    // Draw modules
-    ctx.fillStyle = "#000000";
-    for (let r = 0; r < size; r++) {
-      for (let c = 0; c < size; c++) {
-        if (matrix[r][c]) {
-          ctx.fillRect(
-            (c + padding) * moduleSize,
-            (r + padding) * moduleSize,
-            moduleSize,
-            moduleSize,
-          );
-        }
-      }
-    }
-
-    setQrDataUrl(canvas.toDataURL("image/png"));
-  };
-
-  const handleGenerate = () => {
+  const handleGenerate = useCallback(async () => {
     setError("");
     const payload = buildPayload();
     if (!payload.trim()) {
       setError("Masukkan data terlebih dahulu.");
       return;
     }
-    const matrix = generateMatrix(payload);
-    drawQR(matrix);
-  };
 
-  const download = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    setGenerating(true);
+    try {
+      await QRCode.toCanvas(canvas, payload, {
+        errorCorrectionLevel: ecLevel,
+        margin: 2,
+        width: 300,
+        color: {
+          dark: "#000000",
+          light: "#ffffff",
+        },
+      });
+      setQrDataUrl(canvas.toDataURL("image/png"));
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? `Gagal membuat QR code: ${err.message}`
+          : "Gagal membuat QR code."
+      );
+      setQrDataUrl(null);
+    } finally {
+      setGenerating(false);
+    }
+  }, [buildPayload, ecLevel]);
+
+  const download = useCallback(() => {
     if (!qrDataUrl) return;
     const a = document.createElement("a");
     a.href = qrDataUrl;
     a.download = `qrcode-${mode}.png`;
     a.click();
-  };
+  }, [qrDataUrl, mode]);
 
-  const printQr = () => {
+  const printQr = useCallback(() => {
     if (!qrDataUrl) return;
     const w = window.open("", "_blank");
     if (w) {
@@ -161,7 +94,7 @@ export default function QRGeneratorPage() {
       </body></html>`);
       w.document.close();
     }
-  };
+  }, [qrDataUrl]);
 
   return (
     <div className="qr-page">
@@ -187,7 +120,11 @@ export default function QRGeneratorPage() {
                 key={m.id}
                 type="button"
                 className={`chip ${mode === m.id ? "active" : ""}`}
-                onClick={() => { setMode(m.id); setQrDataUrl(null); setError(""); }}
+                onClick={() => {
+                  setMode(m.id);
+                  setQrDataUrl(null);
+                  setError("");
+                }}
               >
                 {m.label}
               </button>
@@ -226,12 +163,23 @@ export default function QRGeneratorPage() {
                   placeholder="Password WiFi"
                 />
               </label>
-              <label className="form-field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <label
+                className="form-field"
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
                 <input
                   type="checkbox"
                   checked={wifiHidden}
                   onChange={(e) => setWifiHidden(e.target.checked)}
-                  style={{ width: 16, height: 16, accentColor: "var(--accent)" }}
+                  style={{
+                    width: 16,
+                    height: 16,
+                    accentColor: "var(--accent)",
+                  }}
                 />
                 <span>WiFi tersembunyi (hidden SSID)</span>
               </label>
@@ -250,10 +198,31 @@ export default function QRGeneratorPage() {
             </label>
           )}
 
+          {/* Error correction level */}
+          <label className="form-field" style={{ marginTop: 10 }}>
+            <span>Koreksi Error</span>
+            <select
+              value={ecLevel}
+              onChange={(e) => setEcLevel(e.target.value as ECLevel)}
+            >
+              {(["L", "M", "Q", "H"] as ECLevel[]).map((lvl) => (
+                <option key={lvl} value={lvl}>
+                  {lvl} — {EC_LABELS[lvl]}
+                </option>
+              ))}
+            </select>
+          </label>
+
           {error && <p className="error">{error}</p>}
 
-          <button type="button" className="btn btn-primary" onClick={handleGenerate} style={{ marginTop: 8 }}>
-            🔲 Buat QR Code
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={handleGenerate}
+            disabled={generating}
+            style={{ marginTop: 8 }}
+          >
+            {generating ? "Membuat…" : "🔲 Buat QR Code"}
           </button>
         </div>
 
@@ -261,7 +230,11 @@ export default function QRGeneratorPage() {
           <canvas ref={canvasRef} style={{ display: "none" }} />
           {qrDataUrl ? (
             <>
-              <img src={qrDataUrl} alt="QR Code" className="qr-preview-img" />
+              <img
+                src={qrDataUrl}
+                alt="QR Code"
+                className="qr-preview-img"
+              />
               <div className="qr-actions">
                 <button type="button" className="btn" onClick={download}>
                   ⬇️ Unduh PNG
