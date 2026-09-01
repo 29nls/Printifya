@@ -2,6 +2,13 @@
 
 All notable changes to Printifya will be documented in this file.
 
+## 1.1.6 (2026-09-01)
+
+### 🐛 Bug Fixes
+
+- **ci:** add chmod +x for gradlew before build
+
+
 ## 1.1.5 (2026-09-01)
 
 ### 🐛 Bug Fixes
