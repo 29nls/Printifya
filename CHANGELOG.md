@@ -2,6 +2,13 @@
 
 All notable changes to Printifya will be documented in this file.
 
+## 1.1.7 (2026-09-01)
+
+### 🐛 Bug Fixes
+
+- **ci:** upgrade Java to 21 for Capacitor Android compatibility
+
+
 ## 1.1.6 (2026-09-01)
 
 ### 🐛 Bug Fixes
