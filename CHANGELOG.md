@@ -2,6 +2,13 @@
 
 All notable changes to Printifya will be documented in this file.
 
+## 1.2.2 (2026-09-01)
+
+### 🚀 Features
+
+- **ui:** add manual update check button in sidebar footer
+
+
 ## 1.2.1 (2026-09-01)
 
 ### ♻️  Refactors
