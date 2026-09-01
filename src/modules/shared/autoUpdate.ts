@@ -60,10 +60,6 @@ const DEFAULT_CHECK_INTERVAL = 6 * 60 * 60 * 1000; // 6 hours
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-/**
- * Get current app version from Capacitor.
- * Properly extracts versionCode from build.gradle via version string.
- */
 async function getCurrentVersion(): Promise<{ version: string; versionCode: number }> {
   try {
     const info = await App.getInfo();
@@ -91,7 +87,12 @@ function isNative(): boolean {
   return Capacitor.isNativePlatform();
 }
 
-// ── GitHub Releases API Response ──────────────────────────────────────────
+function parseVersionCode(version: string): number {
+  const parts = version.split(".").map(Number);
+  return (parts[0] ?? 0) * 10000 + (parts[1] ?? 0) * 100 + (parts[2] ?? 0);
+}
+
+// ── GitHub Releases API ────────────────────────────────────────────────────
 
 interface GitHubRelease {
   tag_name: string;
@@ -105,19 +106,6 @@ interface GitHubRelease {
   }>;
 }
 
-// ── Main API ───────────────────────────────────────────────────────────────
-
-/**
- * Parse version string to numeric code (e.g., "1.2.3" → 10203).
- */
-function parseVersionCode(version: string): number {
-  const parts = version.split(".").map(Number);
-  return (parts[0] ?? 0) * 10000 + (parts[1] ?? 0) * 100 + (parts[2] ?? 0);
-}
-
-/**
- * Parse GitHub Releases API response into UpdateInfo.
- */
 function parseGitHubRelease(
   release: GitHubRelease,
   owner?: string,
@@ -147,13 +135,8 @@ function parseGitHubRelease(
   };
 }
 
-/**
- * Check for app updates from a remote endpoint.
- *
- * Supports two formats:
- * 1. GitHub Releases API (tag-based): https://api.github.com/repos/{owner}/{repo}/releases/latest
- * 2. Custom JSON: { version, versionCode, notes, apkUrl, ... }
- */
+// ── Check for Update ───────────────────────────────────────────────────────
+
 export async function checkForUpdate(
   config: UpdateConfig,
 ): Promise<UpdateInfo | null> {
@@ -191,7 +174,6 @@ export async function checkForUpdate(
       return null;
     }
 
-    // Check if user skipped this version
     const skipped = await Preferences.get({
       key: STORAGE_KEY_SKIPPED_VERSION,
     });
@@ -200,7 +182,6 @@ export async function checkForUpdate(
       return null;
     }
 
-    // Record check time
     await Preferences.set({
       key: STORAGE_KEY_LAST_CHECK,
       value: Date.now().toString(),
@@ -215,9 +196,6 @@ export async function checkForUpdate(
   }
 }
 
-/**
- * Check if enough time has passed since the last check.
- */
 export async function shouldCheckForUpdate(
   intervalMs: number = DEFAULT_CHECK_INTERVAL,
 ): Promise<boolean> {
@@ -228,89 +206,15 @@ export async function shouldCheckForUpdate(
   return Date.now() - lastTime > intervalMs;
 }
 
-/**
- * Skip a specific version (user declines update).
- */
 export async function skipVersion(version: string): Promise<void> {
   await Preferences.set({ key: STORAGE_KEY_SKIPPED_VERSION, value: version });
 }
 
-/**
- * Clear skipped version (so next check will show it again).
- */
 export async function clearSkippedVersion(): Promise<void> {
   await Preferences.remove({ key: STORAGE_KEY_SKIPPED_VERSION });
 }
 
-/**
- * Download APK to device filesystem.
- * Returns the local file path (relative to Cache directory).
- */
-export async function downloadApk(
-  url: string,
-  filename: string,
-  onProgress?: (progress: DownloadProgress) => void,
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("GET", url, true);
-    xhr.responseType = "blob";
-
-    xhr.onprogress = (e) => {
-      if (e.lengthComputable && e.total > 0) {
-        onProgress?.({
-          loaded: e.loaded,
-          total: e.total,
-          percent: Math.round((e.loaded / e.total) * 100),
-        });
-      }
-    };
-
-    xhr.onload = async () => {
-      if (xhr.status !== 200) {
-        reject(new Error(`Download failed: HTTP ${xhr.status}`));
-        return;
-      }
-
-      const blob = xhr.response;
-      if (!blob || blob.size === 0) {
-        reject(new Error("Downloaded file is empty"));
-        return;
-      }
-
-      try {
-        // Convert blob to base64
-        const base64Data = await blobToBase64(blob);
-        const filePath = `updates/${filename}`;
-
-        // Ensure directory exists
-        try {
-          await Filesystem.mkdir({
-            path: "updates",
-            directory: Directory.Cache,
-            recursive: true,
-          });
-        } catch {
-          // Directory might already exist
-        }
-
-        // Write file
-        await Filesystem.writeFile({
-          path: filePath,
-          data: base64Data,
-          directory: Directory.Cache,
-        });
-
-        resolve(filePath);
-      } catch (err) {
-        reject(err);
-      }
-    };
-
-    xhr.onerror = () => reject(new Error("Network error during download"));
-    xhr.send();
-  });
-}
+// ── Download APK ───────────────────────────────────────────────────────────
 
 /**
  * Convert a Blob to a base64 string (without the data:... prefix).
@@ -333,36 +237,181 @@ function blobToBase64(blob: Blob): Promise<string> {
 }
 
 /**
- * Prompt user to install the downloaded APK.
- * Uses native ApkInstaller plugin on Android for direct package installer.
+ * Resolve the final download URL by following redirects manually.
+ * GitHub's browser_download_url redirects through multiple hops.
  */
+async function resolveDownloadUrl(url: string): Promise<string> {
+  try {
+    // Make a HEAD request to follow redirects and get the final URL
+    const res = await fetch(url, {
+      method: "HEAD",
+      redirect: "follow",
+    });
+    return res.url || url;
+  } catch {
+    // If HEAD fails, try GET with no body
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
+      const res = await fetch(url, {
+        method: "GET",
+        redirect: "follow",
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      // Consume the response body to allow redirect to complete
+      await res.blob();
+      return res.url || url;
+    } catch {
+      return url;
+    }
+  }
+}
+
+/**
+ * Download APK to device filesystem using fetch API.
+ * Handles GitHub redirect chains properly.
+ * Returns the local file path (relative to Cache directory).
+ */
+export async function downloadApk(
+  url: string,
+  filename: string,
+  onProgress?: (progress: DownloadProgress) => void,
+): Promise<string> {
+  onProgress?.({ loaded: 0, total: 0, percent: 0 });
+
+  // Step 1: Resolve the final download URL (follow GitHub redirects)
+  let finalUrl = url;
+  try {
+    finalUrl = await resolveDownloadUrl(url);
+  } catch {
+    // If resolve fails, try the original URL
+    finalUrl = url;
+  }
+
+  // Step 2: Download using fetch with progress tracking via ReadableStream
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 min timeout
+
+  try {
+    const res = await fetch(finalUrl, {
+      signal: controller.signal,
+      headers: {
+        Accept: "application/octet-stream",
+      },
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      throw new Error(`Download failed: HTTP ${res.status}`);
+    }
+
+    const contentLength = Number(res.headers.get("content-length")) || 0;
+    const reader = res.body?.getReader();
+
+    if (!reader) {
+      throw new Error("Cannot read response body");
+    }
+
+    const chunks: Uint8Array[] = [];
+    let loaded = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      loaded += value.length;
+
+      if (contentLength > 0) {
+        onProgress?.({
+          loaded,
+          total: contentLength,
+          percent: Math.round((loaded / contentLength) * 100),
+        });
+      } else {
+        onProgress?.({
+          loaded,
+          total: 0,
+          percent: 0,
+        });
+      }
+    }
+
+    // Combine chunks into a single Uint8Array
+    const totalBytes = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+    const combined = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+      combined.set(chunk, offset);
+      offset += chunk.length;
+    }
+
+    if (totalBytes === 0) {
+      throw new Error("Downloaded file is empty");
+    }
+
+    onProgress?.({ loaded: totalBytes, total: totalBytes, percent: 100 });
+
+    // Step 3: Convert to base64 and write to filesystem
+    const blob = new Blob([combined], { type: "application/vnd.android.package-archive" });
+    const base64Data = await blobToBase64(blob);
+    const filePath = `updates/${filename}`;
+
+    try {
+      await Filesystem.mkdir({
+        path: "updates",
+        directory: Directory.Cache,
+        recursive: true,
+      });
+    } catch {
+      // Directory might already exist
+    }
+
+    await Filesystem.writeFile({
+      path: filePath,
+      data: base64Data,
+      directory: Directory.Cache,
+    });
+
+    return filePath;
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error("Download timeout — koneksi terlalu lambat");
+    }
+    throw err;
+  }
+}
+
+// ── Install APK ────────────────────────────────────────────────────────────
+
 export async function promptInstall(filePath: string): Promise<void> {
   if (!isNative()) {
     throw new Error("Auto-update hanya tersedia di aplikasi Android");
   }
 
-  // Strategy 1: Native ApkInstaller plugin
+  // Strategy 1: Native ApkInstaller plugin with content URI
   try {
     const fileUri = await Filesystem.getUri({
       path: filePath,
       directory: Directory.Cache,
     });
-
     await ApkInstaller.installApk({ path: fileUri.uri });
     return;
   } catch {
-    // Fall through to next strategy
+    // Fall through
   }
 
-  // Strategy 2: Try with the relative path (Java plugin resolves against cache dir)
+  // Strategy 2: Native ApkInstaller with relative path
   try {
     await ApkInstaller.installApk({ path: filePath });
     return;
   } catch {
-    // Fall through to next strategy
+    // Fall through
   }
 
-  // Strategy 3: Share the APK via Android share sheet
+  // Strategy 3: Share the APK
   try {
     await Share.share({
       title: "Install Printifya",
@@ -371,18 +420,16 @@ export async function promptInstall(filePath: string): Promise<void> {
     });
     return;
   } catch {
-    // Fall through to last resort
+    // Fall through
   }
 
-  // Last resort: open release page in browser
   throw new Error(
     "Gagal membuka installer. Coba download APK dari halaman release.",
   );
 }
 
-/**
- * Full update flow: check → download → install prompt.
- */
+// ── Perform Update ─────────────────────────────────────────────────────────
+
 export async function performUpdate(
   updateInfo: UpdateInfo,
   onProgress?: (progress: DownloadProgress) => void,
@@ -390,14 +437,11 @@ export async function performUpdate(
   const filename = `printifya-${updateInfo.version}.apk`;
 
   if (updateInfo.apkUrl) {
-    onProgress?.({ loaded: 0, total: 1, percent: 0 });
     const filePath = await downloadApk(
       updateInfo.apkUrl,
       filename,
       onProgress,
     );
-    onProgress?.({ loaded: 1, total: 1, percent: 100 });
-
     await promptInstall(filePath);
   } else if (updateInfo.releaseUrl) {
     await Browser.open({ url: updateInfo.releaseUrl });
@@ -406,9 +450,8 @@ export async function performUpdate(
   }
 }
 
-/**
- * Auto-check for update on app startup (call once).
- */
+// ── Auto Check ─────────────────────────────────────────────────────────────
+
 export async function autoCheckForUpdate(
   config: UpdateConfig,
 ): Promise<void> {
@@ -424,11 +467,8 @@ export async function autoCheckForUpdate(
   }
 }
 
-// ── Config Helper ─────────────────────────────────────────────────────────
+// ── Config Helper ──────────────────────────────────────────────────────────
 
-/**
- * Create an update config for GitHub Releases.
- */
 export function githubUpdateConfig(opts: {
   owner: string;
   repo: string;
