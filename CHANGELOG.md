@@ -2,6 +2,11 @@
 
 All notable changes to Printifya will be documented in this file.
 
+## 1.2.0 (2026-09-01)
+
+_No notable changes._
+
+
 ## 1.1.8 (2026-09-01)
 
 ### 🐛 Bug Fixes
