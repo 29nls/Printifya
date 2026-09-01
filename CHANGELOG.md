@@ -2,6 +2,13 @@
 
 All notable changes to Printifya will be documented in this file.
 
+## 1.2.3 (2026-09-01)
+
+### 🐛 Bug Fixes
+
+- multiple auto-update and APK installer bugs
+
+
 ## 1.2.2 (2026-09-01)
 
 ### 🚀 Features
