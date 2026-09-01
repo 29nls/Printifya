@@ -2,6 +2,13 @@
 
 All notable changes to Printifya will be documented in this file.
 
+## 1.2.1 (2026-09-01)
+
+### ♻️  Refactors
+
+- **ui:** clean up UI/UX — remove AI slop, mobile-first sidebar
+
+
 ## 1.2.0 (2026-09-01)
 
 _No notable changes._
