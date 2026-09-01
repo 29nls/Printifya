@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import type { UpdateInfo, DownloadProgress } from "../modules/shared/autoUpdate";
 import {
   performUpdate,
@@ -32,6 +32,13 @@ export default function UpdateDialog({
     percent: 0,
   });
   const [errorMsg, setErrorMsg] = useState("");
+
+  // Reset status when updateInfo changes (new version available)
+  useEffect(() => {
+    setStatus("idle");
+    setProgress({ loaded: 0, total: 0, percent: 0 });
+    setErrorMsg("");
+  }, [updateInfo.version]);
 
   const handleUpdate = useCallback(async () => {
     try {

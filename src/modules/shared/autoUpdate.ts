@@ -67,8 +67,6 @@ const DEFAULT_CHECK_INTERVAL = 6 * 60 * 60 * 1000; // 6 hours
 async function getCurrentVersion(): Promise<{ version: string; versionCode: number }> {
   try {
     const info = await App.getInfo();
-    // info.version comes from build.gradle versionName (e.g. "1.1.8")
-    // We parse versionCode from it since App.getInfo() may not expose it directly
     return {
       version: info.version,
       versionCode: parseVersionCode(info.version),
@@ -125,20 +123,16 @@ function parseGitHubRelease(
   owner?: string,
   repo?: string,
 ): UpdateInfo {
-  // Extract version from tag (remove 'v' prefix)
   const version = release.tag_name.replace(/^v/i, "");
 
-  // Find APK asset
   const apkAsset = release.assets.find(
     (a) => a.name.endsWith(".apk") && !a.name.includes("unsigned"),
   );
 
-  // Build correct release URL
   let releaseUrl: string | undefined;
   if (owner && repo) {
     releaseUrl = `https://github.com/${owner}/${repo}/releases/tag/${release.tag_name}`;
   } else if (apkAsset) {
-    // Fallback: use the download URL of the APK itself
     releaseUrl = apkAsset.browser_download_url;
   }
 
@@ -177,21 +171,17 @@ export async function checkForUpdate(
 
     const rawData = await res.json();
 
-    // Detect GitHub Releases API response vs custom JSON
     let data: UpdateInfo;
     if (rawData.tag_name && Array.isArray(rawData.assets)) {
-      // GitHub Releases API format
       data = parseGitHubRelease(
         rawData as GitHubRelease,
         config.githubOwner,
         config.githubRepo,
       );
     } else {
-      // Custom JSON format
       data = rawData as UpdateInfo;
     }
 
-    // Compare version
     const hasNewVersion =
       data.versionCode > current.versionCode ||
       compareVersions(data.version, current.version) > 0;
@@ -234,6 +224,7 @@ export async function shouldCheckForUpdate(
   const last = await Preferences.get({ key: STORAGE_KEY_LAST_CHECK });
   if (!last.value) return true;
   const lastTime = parseInt(last.value, 10);
+  if (isNaN(lastTime)) return true;
   return Date.now() - lastTime > intervalMs;
 }
 
@@ -253,21 +244,20 @@ export async function clearSkippedVersion(): Promise<void> {
 
 /**
  * Download APK to device filesystem.
- * Returns the local file path.
+ * Returns the local file path (relative to Cache directory).
  */
 export async function downloadApk(
   url: string,
   filename: string,
   onProgress?: (progress: DownloadProgress) => void,
 ): Promise<string> {
-  // Use XMLHttpRequest for progress tracking
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("GET", url, true);
     xhr.responseType = "blob";
 
     xhr.onprogress = (e) => {
-      if (e.lengthComputable) {
+      if (e.lengthComputable && e.total > 0) {
         onProgress?.({
           loaded: e.loaded,
           total: e.total,
@@ -282,36 +272,36 @@ export async function downloadApk(
         return;
       }
 
+      const blob = xhr.response;
+      if (!blob || blob.size === 0) {
+        reject(new Error("Downloaded file is empty"));
+        return;
+      }
+
       try {
-        const blob = xhr.response;
         // Convert blob to base64
-        const reader = new FileReader();
-        reader.onload = async () => {
-          const base64Data = (reader.result as string).split(",")[1];
-          const filePath = `updates/${filename}`;
+        const base64Data = await blobToBase64(blob);
+        const filePath = `updates/${filename}`;
 
-          // Ensure directory exists
-          try {
-            await Filesystem.mkdir({
-              path: "updates",
-              directory: Directory.Cache,
-              recursive: true,
-            });
-          } catch {
-            // Directory might already exist
-          }
-
-          // Write file
-          await Filesystem.writeFile({
-            path: filePath,
-            data: base64Data,
+        // Ensure directory exists
+        try {
+          await Filesystem.mkdir({
+            path: "updates",
             directory: Directory.Cache,
+            recursive: true,
           });
+        } catch {
+          // Directory might already exist
+        }
 
-          resolve(filePath);
-        };
-        reader.onerror = () => reject(new Error("Failed to read blob"));
-        reader.readAsDataURL(blob);
+        // Write file
+        await Filesystem.writeFile({
+          path: filePath,
+          data: base64Data,
+          directory: Directory.Cache,
+        });
+
+        resolve(filePath);
       } catch (err) {
         reject(err);
       }
@@ -323,55 +313,71 @@ export async function downloadApk(
 }
 
 /**
+ * Convert a Blob to a base64 string (without the data:... prefix).
+ */
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const base64 = result.split(",")[1];
+      if (!base64) {
+        reject(new Error("Failed to encode file"));
+        return;
+      }
+      resolve(base64);
+    };
+    reader.onerror = () => reject(new Error("Failed to read file"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
  * Prompt user to install the downloaded APK.
  * Uses native ApkInstaller plugin on Android for direct package installer.
  */
 export async function promptInstall(filePath: string): Promise<void> {
-  if (isNative()) {
-    try {
-      // Get the full filesystem URI for the APK
-      const fileUri = await Filesystem.getUri({
-        path: filePath,
-        directory: Directory.Cache,
-      });
-
-      // Use native plugin to open the APK with Android package installer
-      await ApkInstaller.installApk({ path: fileUri.uri });
-      return;
-    } catch {
-      // Fallback: try with direct path
-      try {
-        const fileInfo = await Filesystem.stat({
-          path: filePath,
-          directory: Directory.Cache,
-        });
-        if (fileInfo && fileInfo.uri) {
-          await ApkInstaller.installApk({ path: fileInfo.uri });
-          return;
-        }
-      } catch {
-        // Continue to share fallback
-      }
-
-      // Fallback: share the APK via Android share sheet
-      try {
-        await Share.share({
-          title: "Install Printifya",
-          text: "Buka file APK untuk install Printifya versi baru",
-          files: [filePath],
-        });
-        return;
-      } catch {
-        // Last resort: open release page
-        throw new Error(
-          "Gagal membuka installer. Coba download APK dari halaman release.",
-        );
-      }
-    }
+  if (!isNative()) {
+    throw new Error("Auto-update hanya tersedia di aplikasi Android");
   }
 
-  // Web fallback: nothing to do
-  throw new Error("Auto-update hanya tersedia di aplikasi Android");
+  // Strategy 1: Native ApkInstaller plugin
+  try {
+    const fileUri = await Filesystem.getUri({
+      path: filePath,
+      directory: Directory.Cache,
+    });
+
+    await ApkInstaller.installApk({ path: fileUri.uri });
+    return;
+  } catch {
+    // Fall through to next strategy
+  }
+
+  // Strategy 2: Try with the relative path (Java plugin resolves against cache dir)
+  try {
+    await ApkInstaller.installApk({ path: filePath });
+    return;
+  } catch {
+    // Fall through to next strategy
+  }
+
+  // Strategy 3: Share the APK via Android share sheet
+  try {
+    await Share.share({
+      title: "Install Printifya",
+      text: "Buka file APK untuk install Printifya versi baru",
+      files: [filePath],
+    });
+    return;
+  } catch {
+    // Fall through to last resort
+  }
+
+  // Last resort: open release page in browser
+  throw new Error(
+    "Gagal membuka installer. Coba download APK dari halaman release.",
+  );
 }
 
 /**
@@ -384,7 +390,6 @@ export async function performUpdate(
   const filename = `printifya-${updateInfo.version}.apk`;
 
   if (updateInfo.apkUrl) {
-    // Download APK
     onProgress?.({ loaded: 0, total: 1, percent: 0 });
     const filePath = await downloadApk(
       updateInfo.apkUrl,
@@ -393,10 +398,8 @@ export async function performUpdate(
     );
     onProgress?.({ loaded: 1, total: 1, percent: 100 });
 
-    // Prompt install
     await promptInstall(filePath);
   } else if (updateInfo.releaseUrl) {
-    // Open release page in browser
     await Browser.open({ url: updateInfo.releaseUrl });
   } else {
     throw new Error("Tidak ada URL untuk mengunduh update");
@@ -415,14 +418,13 @@ export async function autoCheckForUpdate(
   const shouldCheck = await shouldCheckForUpdate(checkInterval);
 
   if (shouldCheck) {
-    // Non-blocking check
     setTimeout(() => {
       checkForUpdate(config);
-    }, 3000); // Wait 3s after app start
+    }, 3000);
   }
 }
 
-// ── Example Config ─────────────────────────────────────────────────────────
+// ── Config Helper ─────────────────────────────────────────────────────────
 
 /**
  * Create an update config for GitHub Releases.

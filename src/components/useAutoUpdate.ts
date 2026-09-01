@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { App } from "@capacitor/app";
 import { Capacitor } from "@capacitor/core";
 import type { UpdateInfo } from "../modules/shared/autoUpdate";
@@ -44,7 +44,9 @@ export function useAutoUpdate(options: UseAutoUpdateOptions): UseAutoUpdateRetur
   const [currentVersion, setCurrentVersion] = useState("0.0.0");
   const [isChecking, setIsChecking] = useState(false);
 
-  // Memoize the GitHub config so it doesn't change every render
+  // Use ref for isChecking to avoid stale closure in doCheck
+  const checkingRef = useRef(false);
+
   const githubConfig = useMemo(
     () =>
       githubUpdateConfig({
@@ -71,11 +73,12 @@ export function useAutoUpdate(options: UseAutoUpdateOptions): UseAutoUpdateRetur
   }, []);
 
   const doCheck = useCallback(async () => {
-    if (isChecking) return;
+    if (checkingRef.current) return;
+    checkingRef.current = true;
     setIsChecking(true);
 
     try {
-      const info = await checkForUpdate({
+      await checkForUpdate({
         ...githubConfig,
         onUpdateAvailable: (info) => {
           setUpdateInfo(info);
@@ -89,15 +92,11 @@ export function useAutoUpdate(options: UseAutoUpdateOptions): UseAutoUpdateRetur
           console.warn("Update check failed:", err.message);
         },
       });
-
-      if (info) {
-        setUpdateInfo(info);
-        setHasUpdate(true);
-      }
     } finally {
+      checkingRef.current = false;
       setIsChecking(false);
     }
-  }, [githubConfig, isChecking]);
+  }, [githubConfig]);
 
   // Auto-check on mount
   useEffect(() => {
@@ -107,7 +106,6 @@ export function useAutoUpdate(options: UseAutoUpdateOptions): UseAutoUpdateRetur
     const init = async () => {
       const shouldCheck = await shouldCheckForUpdate(checkIntervalMs);
       if (shouldCheck) {
-        // Delay initial check by 5 seconds
         timer = setTimeout(() => {
           doCheck();
         }, 5000);

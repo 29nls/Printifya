@@ -26,23 +26,27 @@ public class ApkInstallerPlugin extends Plugin {
         }
 
         try {
-            File file = new File(path);
-            if (!file.exists()) {
-                call.reject("APK file not found: " + path);
-                return;
-            }
-
             Uri fileUri;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                // Android 7+: use FileProvider for content:// URI
-                fileUri = FileProvider.getUriForFile(
-                    getContext(),
-                    getContext().getPackageName() + ".fileprovider",
-                    file
-                );
+
+            if (path.startsWith("content://")) {
+                // Already a content:// URI — use directly
+                fileUri = Uri.parse(path);
+            } else if (path.startsWith("file://")) {
+                // file:// URI — extract path and use FileProvider
+                String filePath = Uri.parse(path).getPath();
+                if (filePath == null) {
+                    call.reject("Invalid file URI: " + path);
+                    return;
+                }
+                fileUri = createFileUri(new File(filePath));
             } else {
-                // Android 6 and below: use file:// URI
-                fileUri = Uri.fromFile(file);
+                // Raw file path — resolve against cache directory
+                File file = resolveFile(path);
+                if (!file.exists()) {
+                    call.reject("APK file not found: " + path + " (resolved: " + file.getAbsolutePath() + ")");
+                    return;
+                }
+                fileUri = createFileUri(file);
             }
 
             Intent intent = new Intent(Intent.ACTION_VIEW);
@@ -59,5 +63,33 @@ public class ApkInstallerPlugin extends Plugin {
         } catch (Exception e) {
             call.reject("Failed to open APK installer: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Create a URI for the given file, using FileProvider on Android 7+.
+     */
+    private Uri createFileUri(File file) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            return FileProvider.getUriForFile(
+                getContext(),
+                getContext().getPackageName() + ".fileprovider",
+                file
+            );
+        } else {
+            return Uri.fromFile(file);
+        }
+    }
+
+    /**
+     * Resolve a relative path against the app's cache directory.
+     * Handles paths like "updates/printifya-1.2.2.apk".
+     */
+    private File resolveFile(String path) {
+        // If it's an absolute path, use it directly
+        if (path.startsWith("/")) {
+            return new File(path);
+        }
+        // Otherwise resolve against cache directory
+        return new File(getContext().getCacheDir(), path);
     }
 }
