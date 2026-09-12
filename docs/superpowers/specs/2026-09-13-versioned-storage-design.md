@@ -175,10 +175,15 @@ Moving it to a JSON envelope naively would make every existing user's stored
 paper choice read as empty and reset. Every key kept in scope is already JSON,
 which is exactly why this one is the exception.
 
-**`printifya.printHistory`** has no writers. Nothing in the repository calls
-`addPrintRecord`; the only match is its own definition. No released build has
-ever written that key, so versioning it is busywork. The actual defect is the
-missing write, which belongs in a separate change.
+**`printifya.printHistory`** had no writers. Nothing in the repository called
+`addPrintRecord`; the only match was its own definition, so no released build
+had ever written that key and versioning it was busywork. The missing write was
+the actual defect and belonged in a separate change.
+
+**Resolved afterwards** in `945ad5b`: every user-initiated print now records an
+entry, and the key is versioned in `print-history/printHistoryStorage.ts` on the
+same pattern. It is a log rather than authored content, so recording failures
+deliberately never surface as print errors.
 
 ## Migrations
 
@@ -323,26 +328,35 @@ All three must pass, with the existing suite still green.
 ## Out of scope
 
 - `printifya.letter-paper` and the other 16 stored keys.
-- `printifya.printHistory` versioning.
-- Wiring `addPrintRecord` into the print flows.
+
+(`printifya.printHistory` versioning and wiring `addPrintRecord` were later
+added in `945ad5b`, outside this spec's scope.)
 - Backup/restore UI.
 - Async migrations.
 
 ## Findings reported, not fixed here
 
-**`addPrintRecord` is dead code.** It is exported from
-`print-history/index.tsx:142` and called from nowhere. Print history is
-therefore always empty, the Print History page always shows its empty state, and
-the Home dashboard's "Terakhir Dicetak" section can never populate. The fix is
-to call it from the print flows, which touches the Print Center modules and
-belongs in its own change.
+**`addPrintRecord` was dead code.** It was exported from
+`print-history/index.tsx:142` and called from nowhere, so print history was
+always empty and the Home dashboard's "Terakhir Dicetak" section could never
+populate. Wired up in `945ad5b`.
 
-**`print-history/index.tsx:25` writes raw `localStorage` with no try/catch.**
-This violates the documented convention that all storage access goes through
-`prefsStorage`, and it will throw inside a print flow once `addPrintRecord` is
-wired up. It is latent today only because nothing calls the function.
+**`print-history/index.tsx:25` wrote raw `localStorage` with no try/catch.**
+This violated the documented convention that all storage access goes through
+`prefsStorage`, and it would have thrown inside a print flow once
+`addPrintRecord` was wired up. Fixed in `945ad5b`, which moved the key onto the
+versioned store.
 
-**Two modules bypass the shared gateway.** `print-history/index.tsx` calls
-`localStorage` directly on both read and write, and `pages/Home.tsx:19` reads
-`printifya.printHistory` directly. The README states that no `localStorage.*`
-call exists outside the helper.
+**Two modules bypassed the shared gateway.** `print-history/index.tsx` called
+`localStorage` directly on both read and write, and `pages/Home.tsx:19` read
+`printifya.printHistory` directly. Both now go through the shared helper
+(`945ad5b`). The direct read in `Home.tsx` was the sharper bug of the two: once
+the value gained a version envelope, a raw `JSON.parse` would have returned an
+object rather than an array and the dashboard would have stayed empty forever.
+
+**A registry group still has a null component.** `registry.ts:290` sets
+`Component: null as unknown as ComponentType` for the "Fitur Cepat" group,
+which has a real `path` (`/tools`) but no landing page. Because `App.tsx`
+builds `element={<m.Component />}` for every group eagerly, React logs "type is
+invalid ... got: null" on every render of every page, and visiting `/tools`
+renders a blank content area. Pre-existing since `68fbddc` and untouched here.
