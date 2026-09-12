@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { printHtmlSheet } from "../../print-center/printer-lokal/printHtml";
+import { PAPER_A4 } from "../../photo-studio/shared/paperSize";
+import { recordPrint } from "../../print-history/printHistoryStorage";
 import { downloadUrl } from "../../shared/downloadUrl";
 import {
   buildCsv,
@@ -242,8 +244,11 @@ export default function ExcelSheetPage() {
       const html = buildSheetHtml(grids, activeSheet, getFormat);
       const ok = printHtmlSheet(html);
       if (!ok) setError("Tidak bisa membuat iframe cetak di browser ini.");
+      // Spreadsheet selalu dicetak A4 landscape (lihat @page di buildSheetHtml).
+      recordPrint(SHEET_NAMES[activeSheet], PAPER_A4.name, ok);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Gagal menyiapkan cetak.");
+      recordPrint(SHEET_NAMES[activeSheet], PAPER_A4.name, false);
     } finally {
       setPrinting(false);
     }

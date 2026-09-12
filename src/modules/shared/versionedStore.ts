@@ -169,6 +169,40 @@ export function writeVersioned<T>(
   }
 }
 
+/** Perkiraan ukuran nilai saat diserialisasi (akurat untuk payload base64). */
+export function jsonSizeOf(value: unknown): number {
+  try {
+    return JSON.stringify(value)?.length ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Batasi daftar agar muat `maxItems` entri DAN `maxBytes` (perkiraan panjang
+ * JSON). Urutan dipertahankan — pemanggil menaruh entri terbaru di depan.
+ *
+ * Entri yang melebihi anggaran byte DILEWATI, bukan menghentikan penelusuran:
+ * satu entri raksasa tidak boleh membuang semua entri di belakangnya.
+ */
+export function pruneByBudget<T>(
+  items: T[],
+  maxItems: number,
+  maxBytes: number,
+  sizeOf: (item: T) => number = jsonSizeOf
+): T[] {
+  const kept: T[] = [];
+  let bytes = 0;
+  for (const item of items) {
+    if (kept.length >= maxItems) break;
+    const size = sizeOf(item);
+    if (bytes + size > maxBytes) continue;
+    kept.push(item);
+    bytes += size;
+  }
+  return kept;
+}
+
 /**
  * Helper pengambil field untuk validator: kembalikan field bila bertipe sesuai,
  * selain itu `fallback`. Dipakai agar validator untuk interface lebar tetap

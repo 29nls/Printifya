@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { printHtmlSheet } from "../../print-center/printer-lokal/printHtml";
+import { recordPrint } from "../../print-history/printHistoryStorage";
 import { loadString, saveString } from "../../shared/prefsStorage";
 import { buildDocHtml } from "./docHtml";
 import {
@@ -112,8 +113,10 @@ export default function WordEditorPage() {
       if (!ok) {
         setError("Tidak bisa membuat iframe cetak di browser ini.");
       }
+      recordPrint(title || "Dokumen", paper.name, ok);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Gagal menyiapkan cetak.");
+      recordPrint(title || "Dokumen", paper.name, false);
     } finally {
       setPrinting(false);
     }

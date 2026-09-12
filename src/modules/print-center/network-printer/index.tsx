@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { jsPDF } from "jspdf";
 import { loadPrinters, savePrinters, type Printer } from "./printerStorage";
+import { recordPrint } from "../../print-history/printHistoryStorage";
 import {
   createQzClient,
   escposText,
@@ -212,6 +213,9 @@ export default function NetworkPrinterPage() {
               : j
           )
         );
+        // Jalur raw ESC/POS tidak memakai konsep ukuran kertas, jadi labelnya
+        // "ESC/POS" supaya riwayat tidak menyebut kertas yang tidak dipakai.
+        recordPrint(p.name, "ESC/POS", true);
         return;
       } catch (e) {
         // QZ gagal saat mengirim → lanjut ke jalur berikutnya.
@@ -242,6 +246,7 @@ export default function NetworkPrinterPage() {
           : j
       )
     );
+    recordPrint(p.name, "A4", reachable);
   };
 
   /** Fallback nyata: ekspor isi job sebagai PDF (unduhan) — selalu berfungsi. */

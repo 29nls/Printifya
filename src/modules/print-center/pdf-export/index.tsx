@@ -13,6 +13,7 @@ import {
 } from "../../photo-studio/shared/exportPdf";
 import { getPaper, PAPER_SIZES, type PaperSize } from "../../photo-studio/shared/paperSize";
 import { printHtmlSheet } from "../printer-lokal/printHtml";
+import { recordPrint } from "../../print-history/printHistoryStorage";
 import "../../photo-studio/shared/style.css";
 import "./style.css";
 
@@ -221,6 +222,7 @@ export default function PdfExportPage() {
           orientation,
         });
         if (!ok) setError("Popup diblokir browser. Izinkan pop-up untuk membuka dialog cetak.");
+        recordPrint(size.title, paper.name, ok);
       } else {
         // Jalur HTML (iframe print) — kertas & orientasi mengikuti pengaturan.
         const esc = (s: string) =>
@@ -238,9 +240,15 @@ p { margin: 0 0 8pt; text-align: justify; }
 </style></head><body><h1>${esc(docTitle || "Dokumen")}</h1>${paras.length ? paras.map((p) => `<p>${esc(p)}</p>`).join("\n") : "<p>(dokumen kosong)</p>"}</body></html>`;
         const ok = printHtmlSheet(html);
         if (!ok) setError("Tidak bisa membuat iframe cetak di browser ini.");
+        recordPrint(docTitle || "Dokumen", paper.name, ok);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Gagal menyiapkan cetak.");
+      recordPrint(
+        mode === "foto" ? size.title : docTitle || "Dokumen",
+        paper.name,
+        false
+      );
     } finally {
       setPrinting(false);
     }

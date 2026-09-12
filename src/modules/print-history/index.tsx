@@ -1,29 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import {
+  loadPrintHistory,
+  savePrintHistory,
+  type PrintHistoryLoad,
+  type PrintRecord,
+} from "./printHistoryStorage";
 import "./style.css";
-
-interface PrintRecord {
-  id: string;
-  name: string;
-  copies: number;
-  paperSize: string;
-  timestamp: number;
-  status: "done" | "failed";
-}
-
-const STORAGE_KEY = "printifya.printHistory";
-
-function loadHistory(): PrintRecord[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveHistory(records: PrintRecord[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
-}
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
@@ -32,17 +14,48 @@ function formatTime(ts: number): string {
   return `${day}, ${time}`;
 }
 
+/** Pesan kondisi data tersimpan (dihitung sekali saat mount). */
+function describeLoad(load: PrintHistoryLoad): string {
+  if (load.locked) {
+    return "Riwayat dibuat oleh versi aplikasi yang lebih baru. Perbarui aplikasi sebelum menghapusnya agar data tidak tertimpa.";
+  }
+  if (load.unreadable) {
+    return "Riwayat tersimpan tidak dapat dibaca sehingga tidak dimuat.";
+  }
+  if (load.dropped > 0) {
+    return `${load.dropped} entri riwayat rusak dilewati.`;
+  }
+  return "";
+}
+
 export default function PrintHistoryPage() {
-  const [history, setHistory] = useState<PrintRecord[]>([]);
+  // Dibaca sekali saat mount; hasilnya juga membawa flag kunci (data versi
+  // lebih baru) dan jumlah entri rusak.
+  const [load] = useState(loadPrintHistory);
+  const [history, setHistory] = useState<PrintRecord[]>(load.records);
+  const [notice, setNotice] = useState(() => describeLoad(load));
   const [filter, setFilter] = useState<"all" | "done" | "failed">("all");
 
-  useEffect(() => {
-    setHistory(loadHistory());
-  }, []);
-
   const clearHistory = () => {
+    if (load.locked) {
+      setNotice(
+        "Riwayat dibuat oleh versi aplikasi yang lebih baru. Perbarui aplikasi sebelum menghapusnya."
+      );
+      return;
+    }
+    const result = savePrintHistory([]);
+    if (!result.ok) {
+      // Jangan kosongkan tampilan sebelum tulis benar-benar berhasil: kalau
+      // tidak, riwayat kembali saat modul dibuka ulang.
+      setNotice(
+        result.reason === "quota"
+          ? "Riwayat tidak bisa dihapus: penyimpanan perangkat penuh."
+          : "Riwayat tidak bisa dihapus: penyimpanan tidak tersedia atau diblokir."
+      );
+      return;
+    }
     setHistory([]);
-    saveHistory([]);
+    setNotice("");
   };
 
   const filtered = history.filter((r) => filter === "all" || r.status === filter);
@@ -83,6 +96,8 @@ export default function PrintHistoryPage() {
         </div>
       </div>
 
+      {notice && <p className="error history-notice">{notice}</p>}
+
       {/* Filters */}
       <div className="history-toolbar">
         <div className="scan-mode-group">
@@ -114,7 +129,9 @@ export default function PrintHistoryPage() {
           <span style={{ fontSize: "2.5rem" }}>📋</span>
           <p>Belum ada riwayat cetak</p>
           <p className="history-empty-hint">
-            Riwayat akan muncul setelah Anda mencetak dokumen dari modul Print Center atau Copy Mode.
+            Riwayat akan muncul setelah Anda menekan tombol Cetak di modul mana
+            pun: Pas Foto, Surat, Word Editor, Excel, Auto Layout, Printer Lokal,
+            PDF Export, atau Network Printer.
           </p>
         </div>
       ) : (
@@ -136,20 +153,4 @@ export default function PrintHistoryPage() {
       )}
     </div>
   );
-}
-
-/** Helper: add a record to history (call this from print modules) */
-export function addPrintRecord(name: string, copies: number, paperSize: string, status: "done" | "failed" = "done") {
-  const history = loadHistory();
-  history.unshift({
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    name,
-    copies,
-    paperSize,
-    timestamp: Date.now(),
-    status,
-  });
-  // Keep last 100 records
-  if (history.length > 100) history.length = 100;
-  saveHistory(history);
 }

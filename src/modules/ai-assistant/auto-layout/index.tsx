@@ -26,6 +26,7 @@ import {
   buildHtmlSheet,
   printHtmlSheet,
 } from "../../print-center/printer-lokal/printHtml";
+import { recordPrint } from "../../print-history/printHistoryStorage";
 import { blobToDataUrl } from "../../shared/downloadUrl";
 import { setPendingPasFoto } from "../../shared/pasFotoBridge";
 import {
@@ -589,9 +590,11 @@ export default function AutoLayoutPage() {
     if (!canExport || exporting || printing) return;
     setError("");
     setPrinting(true);
+    // Satu gambar per sel (berurutan); mode siklus memakai isian halaman ini.
+    // Di luar `try` supaya blok `catch` bisa memakai label yang sama.
+    const items = multiPage ? photos : pageItems;
+    const label = `Auto Layout (${items.length} foto)`;
     try {
-      // Satu gambar per sel (berurutan); mode siklus memakai isian halaman ini.
-      const items = multiPage ? photos : pageItems;
       const frames = await ensureFreshFrames();
       const srcs = items.map((p) => frames[p.url] ?? p.url);
       const html = buildHtmlSheet(srcs, size, {
@@ -608,8 +611,10 @@ export default function AutoLayoutPage() {
       if (!ok) {
         setError("Tidak bisa membuat iframe cetak di browser ini.");
       }
+      recordPrint(label, paper.name, ok);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Gagal menyiapkan cetak.");
+      recordPrint(label, paper.name, false);
     } finally {
       setPrinting(false);
     }

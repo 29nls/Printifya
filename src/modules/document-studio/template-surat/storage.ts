@@ -23,6 +23,7 @@ import {
   pickNumber,
   pickString,
   pickNullableString,
+  pruneByBudget,
   readVersioned,
   writeVersioned,
   type VersionedSpec,
@@ -96,37 +97,12 @@ function stripOversizedLogo(value: unknown): unknown {
   return { ...(value as Record<string, unknown>), logo: null };
 }
 
-/** Perkiraan ukuran entri saat diserialisasi (akurat untuk payload base64). */
-function entryChars(entry: unknown): number {
-  try {
-    return JSON.stringify(entry)?.length ?? 0;
-  } catch {
-    return 0;
-  }
-}
-
 /**
  * Pangkas daftar agar muat `MAX_ARCHIVE` entri DAN `MAX_ARCHIVE_BYTES`.
- * Entri terbaru dipertahankan. Entri yang melebihi anggaran byte DILEWATI,
- * bukan menghentikan penelusuran — satu surat raksasa tidak boleh membuang
- * semua surat di belakangnya.
+ * Entri terbaru dipertahankan (pemanggil menaruh yang terbaru di depan).
  */
-function pruneRaw(entries: unknown[]): unknown[] {
-  const kept: unknown[] = [];
-  let chars = 0;
-  for (const entry of entries) {
-    if (kept.length >= MAX_ARCHIVE) break;
-    const size = entryChars(entry);
-    if (chars + size > MAX_ARCHIVE_BYTES) continue;
-    kept.push(entry);
-    chars += size;
-  }
-  return kept;
-}
-
-/** Versi bertipe dari `pruneRaw` untuk dipakai komponen sebelum menyimpan. */
 export function pruneArchive(entries: ArchiveEntry[]): ArchiveEntry[] {
-  return pruneRaw(entries) as ArchiveEntry[];
+  return pruneByBudget(entries, MAX_ARCHIVE, MAX_ARCHIVE_BYTES);
 }
 
 /** Migrasi v1->v2 draf: buang logo yang kebesaran. */
@@ -144,7 +120,7 @@ function migrateArchive(input: unknown): unknown {
     if (nextData === data) return entry;
     return { ...(entry as Record<string, unknown>), data: nextData };
   });
-  return pruneRaw(stripped);
+  return pruneByBudget(stripped, MAX_ARCHIVE, MAX_ARCHIVE_BYTES);
 }
 
 const DRAFT_SPEC: VersionedSpec<LetterFields> = {

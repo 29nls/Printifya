@@ -3,6 +3,8 @@ import type { PasFotoSize } from "../../photo-studio/shared/pasFotoSize";
 import A4SheetPreview from "../../photo-studio/shared/A4SheetPreview";
 import { fitsA4, maxCols, maxRows } from "../../photo-studio/shared/exportPdf";
 import { buildHtmlSheet, printHtmlSheet } from "./printHtml";
+import { PAPER_A4 } from "../../photo-studio/shared/paperSize";
+import { recordPrint } from "../../print-history/printHistoryStorage";
 import "../../photo-studio/shared/style.css";
 import "./style.css";
 
@@ -118,8 +120,12 @@ export default function PrinterLokalPage() {
       if (!ok) {
         setError("Tidak bisa membuat iframe cetak di browser ini.");
       }
+      // Kertas mengikuti default `buildHtmlSheet` (A4) karena modul ini tidak
+      // mengekspos pilihan kertas.
+      recordPrint(size.title, PAPER_A4.name, ok);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Gagal menyiapkan cetak.");
+      recordPrint(size.title, PAPER_A4.name, false);
     } finally {
       setPrinting(false);
     }

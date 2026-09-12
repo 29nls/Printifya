@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { printHtmlSheet } from "../../print-center/printer-lokal/printHtml";
+import { recordPrint } from "../../print-history/printHistoryStorage";
 import { exportLetterPdf } from "./letterPdf";
 import {
   autoNomor,
@@ -295,8 +296,10 @@ export default function TemplateSuratPage() {
       const html = buildLetterHtml(data, paper);
       const ok = printHtmlSheet(html);
       if (!ok) setError("Tidak bisa membuat iframe cetak di browser ini.");
+      recordPrint(perihal || "Surat", paper.name, ok);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Gagal menyiapkan cetak.");
+      recordPrint(perihal || "Surat", paper.name, false);
     } finally {
       setPrinting(false);
     }

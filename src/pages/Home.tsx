@@ -1,28 +1,21 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { MODULES } from "../modules/registry";
+import {
+  loadPrintHistory,
+  type PrintRecord,
+} from "../modules/print-history/printHistoryStorage";
 import "./Home.css";
 
-/* ── Print history (matches print-history/index.tsx storage) ──────── */
+/* ── Print history ────────────────────────────────────────────────── */
 
-interface PrintRecord {
-  id: string;
-  name: string;
-  copies: number;
-  paperSize: string;
-  timestamp: number;
-  status: "done" | "failed";
-}
-
+/**
+ * Dibaca lewat helper bersama, bukan `localStorage` mentah: nilainya disimpan
+ * dalam envelope ber-versi (`{v,d}`), sehingga `JSON.parse` mentah akan
+ * mengembalikan objek, bukan daftar, dan daftar ini selalu tampak kosong.
+ */
 function loadRecentHistory(limit = 5): PrintRecord[] {
-  try {
-    const raw = localStorage.getItem("printifya.printHistory");
-    if (!raw) return [];
-    const all: PrintRecord[] = JSON.parse(raw);
-    return all.slice(0, limit);
-  } catch {
-    return [];
-  }
+  return loadPrintHistory().records.slice(0, limit);
 }
 
 function formatTimeAgo(ts: number): string {

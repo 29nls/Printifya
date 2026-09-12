@@ -32,6 +32,7 @@ import {
   printLayoutPdf,
   printPasFotoPdf,
 } from "./exportPdf";
+import { recordPrint } from "../../print-history/printHistoryStorage";
 import "./style.css";
 
 type Step = "upload" | "edit" | "result";
@@ -387,8 +388,12 @@ export default function PasFotoWorkflow({
           "Popup diblokir browser. Izinkan pop-up untuk membuka dialog cetak."
         );
       }
+      // Hasil pencatatan sengaja diabaikan: riwayat cetak adalah log, dan
+      // gagal mencatat tidak boleh membuat cetakan yang berhasil terlihat gagal.
+      recordPrint(activeSize.title, paper.name, allowed);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Gagal menyiapkan cetak.");
+      recordPrint(activeSize.title, paper.name, false);
     } finally {
       setPrinting(false);
     }
