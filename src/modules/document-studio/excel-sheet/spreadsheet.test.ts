@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildCsv,
   cellDisplay,
   colHeader,
   evaluateRaw,
+  serialFromLocalDate,
+  startOfLocalDaySerial,
   type SheetGrid,
 } from "./spreadsheet";
 
@@ -142,6 +144,74 @@ describe("evaluateRaw — fungsi", () => {
     expect(today as number).toBeGreaterThan(40000); // ≥ ~2009
     expect((now as number) - (today as number)).toBeGreaterThanOrEqual(0);
     expect((now as number) - (today as number)).toBeLessThan(1);
+  });
+
+  it("serial dibangun dari komponen waktu LOKAL, bukan UTC", () => {
+    // `formatSerialDate` membaca serial sebagai waktu dinding UTC (memakai
+    // getUTC*), jadi komponen lokal harus dibangun lewat Date.UTC agar
+    // pengguna melihat tanggal/jamnya sendiri. Harapan dihitung dari
+    // komponen yang sama, sehingga asersi ini tidak bergantung zona waktu
+    // mesin uji.
+    const epoch = Date.UTC(1899, 11, 30);
+    const local = new Date(2026, 8, 13, 6, 30, 15);
+
+    expect(serialFromLocalDate(local)).toBe(
+      (Date.UTC(2026, 8, 13, 6, 30, 15) - epoch) / 86400000
+    );
+    expect(startOfLocalDaySerial(local)).toBe(
+      (Date.UTC(2026, 8, 13) - epoch) / 86400000
+    );
+  });
+
+  it("NOW() - TODAY() selalu di [0,1) — uji regresi basis waktu campuran", () => {
+    // Instan di dekat batas hari UTC. Di zona non-UTC, tanggal lokal dan
+    // tanggal UTC berbeda di titik ini — persis kondisi yang dulu membuat
+    // TODAY() (basis lokal) dan NOW() (basis UTC) berselisih ~satu hari.
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-09-12T23:00:00Z"));
+      const grids = [g([])];
+      const now = evaluateRaw("=NOW()", grids) as number;
+      const today = evaluateRaw("=TODAY()", grids) as number;
+      expect(now - today).toBeGreaterThanOrEqual(0);
+      expect(now - today).toBeLessThan(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("TODAY()/NOW() mengikuti jam sistem, bukan waktu nyata", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-03-05T02:15:30Z"));
+      const grids = [g([])];
+      const d = new Date();
+      const epoch = Date.UTC(1899, 11, 30);
+
+      expect(evaluateRaw("=TODAY()", grids)).toBe(
+        (Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - epoch) /
+          86400000
+      );
+      expect(evaluateRaw("=NOW()", grids)).toBe(serialFromLocalDate(d));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("=NOW() dengan format tampil sebagai tanggal & jam LOKAL", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-03-05T02:15:30Z"));
+      const grids = [g([])];
+      const d = new Date();
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const expected = `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      expect(cellDisplay("=NOW()", grids, 0, "dd/mm/yyyy hh:mm")).toBe(
+        expected
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("fungsi tak dikenal → NaN", () => {

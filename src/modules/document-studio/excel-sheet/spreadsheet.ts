@@ -164,15 +164,45 @@ function serialFromEpochMs(ms: number): number {
   return (ms - epoch) / 86400000;
 }
 
-function todaySerial(): number {
-  const d = new Date();
+/**
+ * Serial dari komponen waktu LOKAL `d`.
+ *
+ * `formatSerialDate` membaca serial sebagai waktu dinding UTC (memakai
+ * `getUTC*`), jadi komponen LOKAL harus dibangun lewat `Date.UTC` supaya
+ * TODAY()/NOW() menampilkan tanggal dan jam pengguna, bukan UTC. Detik dipakai,
+ * milidetik tidak — sama seperti granularitas NOW() di Excel.
+ *
+ * Dulu `nowSerial()` memakai `Date.now()` langsung (basis UTC) sementara
+ * `todaySerial()` memakai basis lokal. Di zona UTC+ keduanya berbeda satu hari
+ * penuh sebelum pukul 07:00 lokal, sehingga `NOW() - TODAY()` bernilai negatif.
+ * Menyatukan kedua basis di satu helper ini mencegah perbedaan itu terulang.
+ */
+export function serialFromLocalDate(d: Date): number {
+  return serialFromEpochMs(
+    Date.UTC(
+      d.getFullYear(),
+      d.getMonth(),
+      d.getDate(),
+      d.getHours(),
+      d.getMinutes(),
+      d.getSeconds()
+    )
+  );
+}
+
+/** Serial awal hari LOKAL `d` (jam/menit/detik diabaikan). */
+export function startOfLocalDaySerial(d: Date): number {
   return serialFromEpochMs(
     Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())
   );
 }
 
+function todaySerial(): number {
+  return startOfLocalDaySerial(new Date());
+}
+
 function nowSerial(): number {
-  return serialFromEpochMs(Date.now());
+  return serialFromLocalDate(new Date());
 }
 
 /** Kumpulkan nilai sel dalam rentang; sel kosong & error dilewati. */
