@@ -215,7 +215,7 @@ export default function NetworkPrinterPage() {
         );
         // Jalur raw ESC/POS tidak memakai konsep ukuran kertas, jadi labelnya
         // "ESC/POS" supaya riwayat tidak menyebut kertas yang tidak dipakai.
-        recordPrint(p.name, "ESC/POS", true);
+        recordPrint({ name: p.name, paperSize: "ESC/POS", ok: true });
         return;
       } catch (e) {
         // QZ gagal saat mengirim → lanjut ke jalur berikutnya.
@@ -246,7 +246,7 @@ export default function NetworkPrinterPage() {
           : j
       )
     );
-    recordPrint(p.name, "A4", reachable);
+    recordPrint({ name: p.name, paperSize: "A4", ok: reachable });
   };
 
   /** Fallback nyata: ekspor isi job sebagai PDF (unduhan) — selalu berfungsi. */

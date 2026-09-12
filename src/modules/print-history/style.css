@@ -78,6 +78,21 @@
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+  flex: 1;
+}
+
+/* Tombol cetak ulang — hanya muncul saat hasil cetak entri tersimpan. */
+.history-reprint {
+  flex-shrink: 0;
+  font-size: 15px;
+  line-height: 1;
+  padding: 8px 12px;
+}
+
+.history-hint {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .history-item-name {

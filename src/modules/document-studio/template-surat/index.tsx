@@ -296,10 +296,18 @@ export default function TemplateSuratPage() {
       const html = buildLetterHtml(data, paper);
       const ok = printHtmlSheet(html);
       if (!ok) setError("Tidak bisa membuat iframe cetak di browser ini.");
-      recordPrint(perihal || "Surat", paper.name, ok);
+      // HTML disertakan supaya entri ini bisa dicetak ulang persis. Surat
+      // berlogo besar bisa melebihi anggaran simpan, dan saat itu aksi cetak
+      // ulang tidak muncul — entrinya tetap tercatat.
+      recordPrint({
+        name: perihal || "Surat",
+        paperSize: paper.name,
+        ok,
+        html,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Gagal menyiapkan cetak.");
-      recordPrint(perihal || "Surat", paper.name, false);
+      recordPrint({ name: perihal || "Surat", paperSize: paper.name, ok: false });
     } finally {
       setPrinting(false);
     }

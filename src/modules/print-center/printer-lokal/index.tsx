@@ -121,11 +121,12 @@ export default function PrinterLokalPage() {
         setError("Tidak bisa membuat iframe cetak di browser ini.");
       }
       // Kertas mengikuti default `buildHtmlSheet` (A4) karena modul ini tidak
-      // mengekspos pilihan kertas.
-      recordPrint(size.title, PAPER_A4.name, ok);
+      // mengekspos pilihan kertas. HTML menyematkan data URL foto, jadi
+      // biasanya melebihi anggaran simpan dan tidak bisa dicetak ulang.
+      recordPrint({ name: size.title, paperSize: PAPER_A4.name, ok, html });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Gagal menyiapkan cetak.");
-      recordPrint(size.title, PAPER_A4.name, false);
+      recordPrint({ name: size.title, paperSize: PAPER_A4.name, ok: false });
     } finally {
       setPrinting(false);
     }

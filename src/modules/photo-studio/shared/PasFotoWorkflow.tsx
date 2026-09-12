@@ -390,10 +390,20 @@ export default function PasFotoWorkflow({
       }
       // Hasil pencatatan sengaja diabaikan: riwayat cetak adalah log, dan
       // gagal mencatat tidak boleh membuat cetakan yang berhasil terlihat gagal.
-      recordPrint(activeSize.title, paper.name, allowed);
+      // Jalur PDF (autoPrint) tidak menyimpan hasil cetak, jadi entri ini tidak
+      // punya aksi cetak ulang.
+      recordPrint({
+        name: activeSize.title,
+        paperSize: paper.name,
+        ok: allowed,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Gagal menyiapkan cetak.");
-      recordPrint(activeSize.title, paper.name, false);
+      recordPrint({
+        name: activeSize.title,
+        paperSize: paper.name,
+        ok: false,
+      });
     } finally {
       setPrinting(false);
     }

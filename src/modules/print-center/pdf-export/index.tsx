@@ -222,7 +222,8 @@ export default function PdfExportPage() {
           orientation,
         });
         if (!ok) setError("Popup diblokir browser. Izinkan pop-up untuk membuka dialog cetak.");
-        recordPrint(size.title, paper.name, ok);
+        // Mode foto memakai jalur PDF (autoPrint); hasil cetaknya tidak disimpan.
+        recordPrint({ name: size.title, paperSize: paper.name, ok });
       } else {
         // Jalur HTML (iframe print) — kertas & orientasi mengikuti pengaturan.
         const esc = (s: string) =>
@@ -240,15 +241,20 @@ p { margin: 0 0 8pt; text-align: justify; }
 </style></head><body><h1>${esc(docTitle || "Dokumen")}</h1>${paras.length ? paras.map((p) => `<p>${esc(p)}</p>`).join("\n") : "<p>(dokumen kosong)</p>"}</body></html>`;
         const ok = printHtmlSheet(html);
         if (!ok) setError("Tidak bisa membuat iframe cetak di browser ini.");
-        recordPrint(docTitle || "Dokumen", paper.name, ok);
+        recordPrint({
+          name: docTitle || "Dokumen",
+          paperSize: paper.name,
+          ok,
+          html,
+        });
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Gagal menyiapkan cetak.");
-      recordPrint(
-        mode === "foto" ? size.title : docTitle || "Dokumen",
-        paper.name,
-        false
-      );
+      recordPrint({
+        name: mode === "foto" ? size.title : docTitle || "Dokumen",
+        paperSize: paper.name,
+        ok: false,
+      });
     } finally {
       setPrinting(false);
     }

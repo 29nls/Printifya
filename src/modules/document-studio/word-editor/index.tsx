@@ -113,10 +113,17 @@ export default function WordEditorPage() {
       if (!ok) {
         setError("Tidak bisa membuat iframe cetak di browser ini.");
       }
-      recordPrint(title || "Dokumen", paper.name, ok);
+      // HTML disertakan supaya entri ini bisa dicetak ulang persis: dokumen
+      // Word sendiri tidak dipersist, jadi ini satu-satunya salinan isinya.
+      recordPrint({
+        name: title || "Dokumen",
+        paperSize: paper.name,
+        ok,
+        html,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Gagal menyiapkan cetak.");
-      recordPrint(title || "Dokumen", paper.name, false);
+      recordPrint({ name: title || "Dokumen", paperSize: paper.name, ok: false });
     } finally {
       setPrinting(false);
     }

@@ -611,10 +611,12 @@ export default function AutoLayoutPage() {
       if (!ok) {
         setError("Tidak bisa membuat iframe cetak di browser ini.");
       }
-      recordPrint(label, paper.name, ok);
+      // HTML menyematkan data URL foto, jadi hampir selalu melebihi anggaran
+      // simpan: entrinya tercatat, aksi cetak ulangnya tidak muncul.
+      recordPrint({ name: label, paperSize: paper.name, ok, html });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Gagal menyiapkan cetak.");
-      recordPrint(label, paper.name, false);
+      recordPrint({ name: label, paperSize: paper.name, ok: false });
     } finally {
       setPrinting(false);
     }

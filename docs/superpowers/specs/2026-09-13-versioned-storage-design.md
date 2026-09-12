@@ -330,7 +330,8 @@ All three must pass, with the existing suite still green.
 - `printifya.letter-paper` and the other 16 stored keys.
 
 (`printifya.printHistory` versioning and wiring `addPrintRecord` were later
-added in `945ad5b`, outside this spec's scope.)
+added in `945ad5b`, outside this spec's scope. The reprint payload it gained
+afterwards is recorded in the addendum at the end of this document.)
 - Backup/restore UI.
 - Async migrations.
 
@@ -361,3 +362,52 @@ builds `element={<m.Component />}` for every group eagerly, React logged "type
 is invalid ... got: null" on every render of every page, and visiting `/tools`
 rendered a blank content area. Pre-existing since `68fbddc`, fixed in `88b0203`
 by adding the same `ModuleOverview` landing page the four sibling groups use.
+
+## Addendum: cetak ulang dari riwayat cetak
+
+Print history stores only a name, a paper size, and a status. That is enough to
+list what happened but not to repeat it, because the modules persist wildly
+different amounts. Template Surat keeps its whole draft, Auto Layout keeps its
+frame settings, Pas Foto keeps a size id, Word Editor keeps only a paper size,
+and Excel Sheet keeps nothing. A "reopen the source module" button would drop
+the user into an empty editor for Word and Excel, which reads as broken.
+
+The design therefore stores the **print-ready HTML** itself, since that is
+exactly what the print path produces and is self-contained by construction.
+
+### Version 2 payload
+
+```ts
+{ records: PrintRecord[], blobs: Record<string, string> }
+```
+
+`records` stays small (name, paper, sheets, time, status) and carries an optional
+`htmlKey`. `blobs` holds the HTML, **keyed by content** so printing the same
+document repeatedly stores one copy rather than duplicating it per entry.
+Matching is exact string comparison rather than a hash, because a hash collision
+would silently reprint the wrong document, and there are only ever a handful of
+blobs.
+
+The v1 to v2 migration wraps the bare array and supplies empty `blobs`; entries
+written before the feature existed are readable but not reprintable, because
+their content was never stored.
+
+### Budget
+
+Two separate allowances, `MAX_REPRINT_CHARS = 160_000` for one HTML string and
+`MAX_REPRINT_TOTAL_CHARS = 320_000` across all of them. A print whose HTML
+exceeds the per-item limit still records an entry, it just has no reprint
+action. This is deliberately a **size** rule rather than a module allowlist:
+photo-based paths (Pas Foto, Auto Layout, Printer Lokal) embed image data URLs
+and are always over budget, while text paths are always under it. A module list
+would have to be kept in sync by hand and would rot.
+
+Unreferenced blobs are dropped on every write, so a pruned record does not
+leave its HTML occupying quota.
+
+### Behavior
+
+Reprint is a new print action, so it appends a record with a fresh timestamp and
+reuses the existing blob. Honest limits, stated in the UI: `copies` is always 1
+sheet because the browser print dialog owns the copy count, and a `done` status
+means the dialog opened or the job was sent, not that paper emerged.

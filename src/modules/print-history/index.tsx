@@ -1,6 +1,9 @@
 import { useState } from "react";
+import { printHtmlSheet } from "../print-center/printer-lokal/printHtml";
 import {
   loadPrintHistory,
+  loadReprintHtml,
+  recordPrint,
   savePrintHistory,
   type PrintHistoryLoad,
   type PrintRecord,
@@ -30,9 +33,12 @@ function describeLoad(load: PrintHistoryLoad): string {
 
 export default function PrintHistoryPage() {
   // Dibaca sekali saat mount; hasilnya juga membawa flag kunci (data versi
-  // lebih baru) dan jumlah entri rusak.
+  // lebih baru), entri rusak yang dilewati, dan entri yang bisa dicetak ulang.
   const [load] = useState(loadPrintHistory);
   const [history, setHistory] = useState<PrintRecord[]>(load.records);
+  const [reprintable, setReprintable] = useState(
+    () => new Set(load.reprintable)
+  );
   const [notice, setNotice] = useState(() => describeLoad(load));
   const [filter, setFilter] = useState<"all" | "done" | "failed">("all");
 
@@ -55,6 +61,35 @@ export default function PrintHistoryPage() {
       return;
     }
     setHistory([]);
+    setReprintable(new Set());
+    setNotice("");
+  };
+
+  /** Cetak ulang hasil cetak yang tersimpan, lalu catat sebagai aksi baru. */
+  const reprint = (record: PrintRecord) => {
+    const html = loadReprintHtml(record);
+    if (html === null) {
+      setNotice(
+        "Hasil cetak entri ini tidak tersimpan, jadi tidak bisa dicetak ulang."
+      );
+      return;
+    }
+    if (!printHtmlSheet(html)) {
+      setNotice("Tidak bisa membuka dialog cetak di browser ini.");
+      return;
+    }
+    // Cetak ulang adalah aksi cetak baru, jadi entrinya bertambah. Isi yang
+    // sama memakai blob yang sudah ada, sehingga penyimpanan tidak bertambah.
+    recordPrint({
+      name: record.name,
+      paperSize: record.paperSize,
+      copies: record.copies,
+      ok: true,
+      html,
+    });
+    const fresh = loadPrintHistory();
+    setHistory(fresh.records);
+    setReprintable(new Set(fresh.reprintable));
     setNotice("");
   };
 
@@ -135,21 +170,38 @@ export default function PrintHistoryPage() {
           </p>
         </div>
       ) : (
-        <div className="history-list">
-          {filtered.map((record) => (
-            <div key={record.id} className="history-item">
-              <div className="history-item-icon">
-                {record.status === "done" ? "✅" : "❌"}
+        <>
+          <div className="history-list">
+            {filtered.map((record) => (
+              <div key={record.id} className="history-item">
+                <div className="history-item-icon">
+                  {record.status === "done" ? "✅" : "❌"}
+                </div>
+                <div className="history-item-info">
+                  <span className="history-item-name">{record.name}</span>
+                  <span className="history-item-meta">
+                    {record.copies} lembar · {record.paperSize} · {formatTime(record.timestamp)}
+                  </span>
+                </div>
+                {reprintable.has(record.id) && (
+                  <button
+                    type="button"
+                    className="btn history-reprint"
+                    title="Cetak lagi dengan hasil yang sama"
+                    onClick={() => reprint(record)}
+                  >
+                    🖨️
+                  </button>
+                )}
               </div>
-              <div className="history-item-info">
-                <span className="history-item-name">{record.name}</span>
-                <span className="history-item-meta">
-                  {record.copies} lembar · {record.paperSize} · {formatTime(record.timestamp)}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+          <p className="history-hint">
+            Entri dengan tombol 🖨️ bisa dicetak ulang persis seperti hasil
+            sebelumnya. Hasil cetak yang memuat foto terlalu besar untuk
+            disimpan, jadi entri itu tidak punya tombol cetak ulang.
+          </p>
+        </>
       )}
     </div>
   );

@@ -245,10 +245,21 @@ export default function ExcelSheetPage() {
       const ok = printHtmlSheet(html);
       if (!ok) setError("Tidak bisa membuat iframe cetak di browser ini.");
       // Spreadsheet selalu dicetak A4 landscape (lihat @page di buildSheetHtml).
-      recordPrint(SHEET_NAMES[activeSheet], PAPER_A4.name, ok);
+      // HTML disertakan agar bisa dicetak ulang; lembar itu sendiri tidak
+      // dipersist modul ini.
+      recordPrint({
+        name: SHEET_NAMES[activeSheet],
+        paperSize: PAPER_A4.name,
+        ok,
+        html,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Gagal menyiapkan cetak.");
-      recordPrint(SHEET_NAMES[activeSheet], PAPER_A4.name, false);
+      recordPrint({
+        name: SHEET_NAMES[activeSheet],
+        paperSize: PAPER_A4.name,
+        ok: false,
+      });
     } finally {
       setPrinting(false);
     }
