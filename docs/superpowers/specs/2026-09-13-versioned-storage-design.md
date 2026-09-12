@@ -354,9 +354,10 @@ versioned store.
 the value gained a version envelope, a raw `JSON.parse` would have returned an
 object rather than an array and the dashboard would have stayed empty forever.
 
-**A registry group still has a null component.** `registry.ts:290` sets
+**A registry group had a null component.** `registry.ts` set
 `Component: null as unknown as ComponentType` for the "Fitur Cepat" group,
-which has a real `path` (`/tools`) but no landing page. Because `App.tsx`
-builds `element={<m.Component />}` for every group eagerly, React logs "type is
-invalid ... got: null" on every render of every page, and visiting `/tools`
-renders a blank content area. Pre-existing since `68fbddc` and untouched here.
+which had a real `path` (`/tools`) but no landing page. Because `App.tsx`
+builds `element={<m.Component />}` for every group eagerly, React logged "type
+is invalid ... got: null" on every render of every page, and visiting `/tools`
+rendered a blank content area. Pre-existing since `68fbddc`, fixed in `88b0203`
+by adding the same `ModuleOverview` landing page the four sibling groups use.
