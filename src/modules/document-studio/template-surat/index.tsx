@@ -14,11 +14,15 @@ import {
   loadArchive,
   loadDraft,
   loadPaperId,
+  makeEntryId,
+  pruneArchive,
   saveArchive,
   saveDraft,
   savePaperId,
   type ArchiveEntry,
 } from "./storage";
+import { downscaleLogo } from "./logoImage";
+import type { WriteResult } from "../../shared/versionedStore";
 import ResetPreferencesButton from "../../shared/ResetPreferencesButton";
 import {
   getPaper,
@@ -38,6 +42,18 @@ function todayIso(): string {
 
 const DEFAULT_PENUTUP =
   "Demikian surat ini kami sampaikan. Atas perhatian dan kerja samanya, kami ucapkan terima kasih.";
+
+/** Data tersimpan milik versi aplikasi yang lebih baru — jangan ditimpa. */
+const LOCKED_MESSAGE =
+  "Data tersimpan dibuat oleh versi aplikasi yang lebih baru. Perbarui aplikasi sebelum mengubah surat agar data tidak tertimpa.";
+
+/** Pesan kegagalan tulis yang bisa ditindaklanjuti pengguna. */
+function storageWriteError(result: WriteResult): string {
+  if (result.ok) return "";
+  return result.reason === "quota"
+    ? "Gagal menyimpan: penyimpanan perangkat penuh. Hapus surat lama dari riwayat lalu coba lagi."
+    : "Gagal menyimpan: penyimpanan perangkat tidak tersedia atau diblokir.";
+}
 
 export default function TemplateSuratPage() {
   const [instansi, setInstansi] = useState("PT Printifya Nusantara");
@@ -59,7 +75,14 @@ export default function TemplateSuratPage() {
   const [info, setInfo] = useState("");
   const logoRef = useRef<HTMLInputElement>(null);
   const [hydrated, setHydrated] = useState(false);
-  const [archive, setArchive] = useState<ArchiveEntry[]>(() => loadArchive());
+  // Dibaca sekali saat mount (sinkron). Hasilnya membawa flag kunci — data
+  // ditulis versi aplikasi lebih baru — plus jumlah entri/logo yang disesuaikan
+  // migrasi, supaya kehilangan data tidak disajikan sebagai hal normal.
+  const [draftLoad] = useState(loadDraft);
+  const [archiveLoad] = useState(loadArchive);
+  const locked = draftLoad.locked || archiveLoad.locked;
+  const [archive, setArchive] = useState<ArchiveEntry[]>(archiveLoad.entries);
+  const [draftSaveFailed, setDraftSaveFailed] = useState(false);
   const [paper, setPaper] = useState<PaperSize>(() =>
     getPaper(loadPaperId() ?? undefined)
   );
@@ -120,45 +143,112 @@ export default function TemplateSuratPage() {
 
   // Pulihkan draf terakhir saat modul dibuka.
   useEffect(() => {
-    const draft = loadDraft();
-    if (draft) applyFields(draft);
+    if (draftLoad.fields) applyFields(draftLoad.fields);
     setHydrated(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-save draf (debounce) setelah hydrate selesai.
+  // Laporkan apa yang terjadi pada data tersimpan (sekali saat mount): data
+  // versi lebih baru, data tidak terbaca, atau penyesuaian yang dilakukan
+  // migrasi. Tanpa ini, bagian yang dilepas hilang tanpa jejak.
   useEffect(() => {
-    if (!hydrated) return;
-    const t = setTimeout(() => saveDraft(fields), 500);
+    if (locked) {
+      setError(LOCKED_MESSAGE);
+      return;
+    }
+    if (draftLoad.unreadable || archiveLoad.unreadable) {
+      setError(
+        "Sebagian data tersimpan tidak dapat dibaca sehingga tidak dimuat. Surat baru tetap bisa dibuat dan disimpan."
+      );
+    }
+    const notes: string[] = [];
+    if (draftLoad.removedLogo) {
+      notes.push("logo draf dilepas karena terlalu besar");
+    }
+    if (archiveLoad.removedLogos > 0) {
+      notes.push(
+        `${archiveLoad.removedLogos} logo surat dilepas karena terlalu besar`
+      );
+    }
+    if (archiveLoad.evicted > 0) {
+      notes.push(
+        `${archiveLoad.evicted} surat lama dilepas agar muat penyimpanan`
+      );
+    }
+    if (archiveLoad.dropped > 0) {
+      notes.push(`${archiveLoad.dropped} entri riwayat rusak dilewati`);
+    }
+    if (notes.length > 0) {
+      setInfo(`Penyimpanan disesuaikan: ${notes.join(", ")}.`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-save draf (debounce) setelah hydrate selesai. Dilewati sepenuhnya
+  // saat data tersimpan milik versi aplikasi yang lebih baru, supaya build
+  // lama tidak menimpa data build baru.
+  useEffect(() => {
+    if (!hydrated || locked) return;
+    const t = setTimeout(() => {
+      setDraftSaveFailed(!saveDraft(fields).ok);
+    }, 500);
     return () => clearTimeout(t);
-  }, [fields, hydrated]);
+  }, [fields, hydrated, locked]);
 
   // Persist ukuran kertas terpilih.
   useEffect(() => savePaperId(paper.id), [paper]);
 
-  const onLogo = (file?: File | null) => {
+  // Logo disimpan di draf DAN digandakan ke tiap entri riwayat, jadi berkas
+  // dibaca apa adanya sebelumnya bisa menghabiskan kuota localStorage dan
+  // membuat penulisan riwayat gagal senyap. Downscale sebelum disimpan.
+  const onLogo = async (file?: File | null) => {
     setError("");
     if (!file) return;
     if (!file.type.startsWith("image/")) {
       setError("Logo harus berupa gambar (JPG, PNG, atau WebP).");
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => setLogo(reader.result as string);
-    reader.readAsDataURL(file);
+    try {
+      setLogo(await downscaleLogo(file));
+    } catch {
+      setError("Logo gagal diproses. Coba gambar lain (JPG atau PNG).");
+    }
   };
 
   const saveToArchive = () => {
+    if (locked) {
+      setError(LOCKED_MESSAGE);
+      return;
+    }
     const entry: ArchiveEntry = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      id: makeEntryId(),
       savedAt: new Date().toISOString(),
       data: fields,
     };
-    const next = [entry, ...archive].slice(0, 50);
+    // Pangkas dulu, baru simpan: state dan storage harus memuat daftar yang
+    // sama, dan pesan sukses hanya muncul setelah tulis benar-benar berhasil.
+    const next = pruneArchive([entry, ...archive]);
+    // Surat BARU bisa ikut terpangkas kalau ukurannya sendiri melebihi anggaran
+    // byte. Tanpa pemeriksaan ini pesan sukses muncul sementara surat barunya
+    // tidak pernah tersimpan.
+    if (!next.some((e) => e.id === entry.id)) {
+      setError(
+        "Surat tidak tersimpan: ukurannya melebihi batas penyimpanan perangkat. Persingkat isi surat lalu coba lagi."
+      );
+      return;
+    }
+    const result = saveArchive(next);
+    if (!result.ok) {
+      setError(storageWriteError(result));
+      return;
+    }
     setArchive(next);
-    saveArchive(next);
     setError("");
-    setInfo("Surat tersimpan ke riwayat.");
+    setInfo(
+      next.length < archive.length + 1
+        ? "Surat tersimpan. Surat lama dilepas agar muat penyimpanan."
+        : "Surat tersimpan ke riwayat."
+    );
   };
 
   const loadEntry = (entry: ArchiveEntry) => {
@@ -167,9 +257,20 @@ export default function TemplateSuratPage() {
   };
 
   const deleteEntry = (id: string) => {
+    if (locked) {
+      setError(LOCKED_MESSAGE);
+      return;
+    }
     const next = archive.filter((a) => a.id !== id);
+    const result = saveArchive(next);
+    if (!result.ok) {
+      // Jangan tampilkan seolah terhapus: tanpa tulis yang berhasil, entri
+      // akan kembali saat modul dibuka ulang.
+      setError(storageWriteError(result));
+      return;
+    }
     setArchive(next);
-    saveArchive(next);
+    setError("");
   };
 
   const handleExportPdf = async () => {
@@ -450,10 +551,12 @@ export default function TemplateSuratPage() {
                       <strong>{a.data.perihal || "(tanpa perihal)"}</strong>
                       <span>
                         {autoNomor(a.data.seq, a.data.kode, a.data.tanggal)} ·{" "}
-                        {new Date(a.savedAt).toLocaleString("id-ID", {
-                          dateStyle: "medium",
-                          timeStyle: "short",
-                        })}
+                        {a.savedAt
+                          ? new Date(a.savedAt).toLocaleString("id-ID", {
+                              dateStyle: "medium",
+                              timeStyle: "short",
+                            })
+                          : "tanggal tidak diketahui"}
                       </span>
                     </button>
                     <button
@@ -470,6 +573,12 @@ export default function TemplateSuratPage() {
             )}
           </section>
 
+          {draftSaveFailed && (
+            <p className="error">
+              Draf tidak tersimpan otomatis: penyimpanan perangkat penuh. Hapus
+              surat lama dari riwayat untuk mengosongkan ruang.
+            </p>
+          )}
           {error && <p className="error">{error}</p>}
         </div>
 

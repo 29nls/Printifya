@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { jsPDF } from "jspdf";
-import { loadJSON, saveJSON } from "../../shared/prefsStorage";
+import { loadPrinters, savePrinters, type Printer } from "./printerStorage";
 import {
   createQzClient,
   escposText,
@@ -12,14 +12,6 @@ import "../../photo-studio/shared/style.css";
 import "../qz-tray/style.css"; // .qz-status / .qz-dot untuk panel QZ
 import "./style.css";
 
-interface Printer {
-  id: string;
-  name: string;
-  host: string;
-  port: number;
-  path: string;
-}
-
 interface Job {
   id: string;
   printerId: string;
@@ -29,22 +21,11 @@ interface Job {
   note?: string;
 }
 
-const STORE_KEY = "printifya.network-printers";
-
-function loadPrinters(): Printer[] {
-  return (
-    loadJSON<Printer[]>(STORE_KEY, (value) =>
-      Array.isArray(value) ? (value as Printer[]) : null
-    ) ?? []
-  );
-}
-
-function savePrinters(list: Printer[]): void {
-  saveJSON(STORE_KEY, list);
-}
-
 export default function NetworkPrinterPage() {
-  const [printers, setPrinters] = useState<Printer[]>(() => loadPrinters());
+  // Dibaca sekali saat mount; flag kunci dipakai untuk mencegah build lama
+  // menimpa data yang ditulis versi aplikasi lebih baru.
+  const [printersLoad] = useState(loadPrinters);
+  const [printers, setPrinters] = useState<Printer[]>(printersLoad.printers);
   const [name, setName] = useState("");
   const [host, setHost] = useState("192.168.1.100");
   const [port, setPort] = useState(631);
@@ -76,14 +57,58 @@ export default function NetworkPrinterPage() {
   }
   const qzClient = clientRef.current;
 
+  // Laporkan kondisi data tersimpan (sekali saat mount). Kondisi ini juga
+  // memblokir penulisan lewat `printersLoad.locked`.
   useEffect(() => {
-    savePrinters(printers);
+    if (printersLoad.locked) {
+      setError(
+        "Daftar printer dibuat oleh versi aplikasi yang lebih baru. Perbarui aplikasi sebelum mengubahnya agar data tidak tertimpa."
+      );
+      return;
+    }
+    if (printersLoad.unreadable) {
+      setError("Daftar printer tersimpan tidak dapat dibaca.");
+      return;
+    }
+    if (printersLoad.dropped > 0) {
+      setError(
+        `${printersLoad.dropped} entri printer rusak (host/port tidak valid) dilewati.`
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Efek ini berjalan saat mount juga. Tanpa penjaga `savedOnce`, daftar kosong
+  // hasil baca yang gagal (versi lebih baru / tidak terbaca) langsung menimpa
+  // data tersimpan — itu skenario kehilangan data yang dicegah modul ini.
+  const savedOnce = useRef(false);
+  useEffect(() => {
+    if (!savedOnce.current) {
+      savedOnce.current = true;
+      return;
+    }
+    if (printersLoad.locked) return;
+    const result = savePrinters(printers);
+    if (!result.ok) {
+      setError(
+        result.reason === "quota"
+          ? "Daftar printer tidak tersimpan: penyimpanan perangkat penuh."
+          : "Daftar printer tidak tersimpan: penyimpanan tidak tersedia."
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [printers]);
 
   useEffect(() => () => qzClient.disconnect(), [qzClient]);
 
   const addPrinter = () => {
     setError("");
+    if (printersLoad.locked) {
+      setError(
+        "Daftar printer dibuat oleh versi aplikasi yang lebih baru. Perbarui aplikasi sebelum mengubahnya."
+      );
+      return;
+    }
     if (!name.trim() || !host.trim()) {
       setError("Nama dan host/IP printer wajib diisi.");
       return;
@@ -101,6 +126,12 @@ export default function NetworkPrinterPage() {
   };
 
   const removePrinter = (id: string) => {
+    if (printersLoad.locked) {
+      setError(
+        "Daftar printer dibuat oleh versi aplikasi yang lebih baru. Perbarui aplikasi sebelum mengubahnya."
+      );
+      return;
+    }
     setPrinters((prev) => prev.filter((p) => p.id !== id));
     setJobs((prev) => prev.filter((j) => j.printerId !== id));
   };
