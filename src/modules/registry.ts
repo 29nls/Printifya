@@ -8,6 +8,7 @@ const PhotoStudioPage = lazy(() => import("./photo-studio"));
 const DocumentStudioPage = lazy(() => import("./document-studio"));
 const PrintCenterPage = lazy(() => import("./print-center"));
 const AiAssistantPage = lazy(() => import("./ai-assistant"));
+const ToolsPage = lazy(() => import("./tools"));
 
 // Photo Studio (pas-foto pages are factory-generated, one import for all 3)
 import { PasFoto2x3Page, PasFoto3x4Page, PasFoto4x6Page } from "./photo-studio/shared/pasFotoPages";
@@ -287,7 +288,7 @@ export const MODULES: Module[] = [
     icon: "⚡",
     description:
       "Alat cetak cepat: scan dokumen, template siap pakai, QR code, dan riwayat cetak.",
-    Component: null as unknown as ComponentType,
+    Component: ToolsPage,
     children: [
       {
         id: "scan",
