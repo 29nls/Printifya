@@ -1,0 +1,53 @@
+name: CI
+
+# Gerbang mutu untuk setiap push dan pull request.
+#
+# Sengaja terpisah dari `release.yml`. Alur rilis dipicu oleh tag, jadi tanpa
+# berkas ini kegagalan tes baru terlihat saat APK hendak dibuat — terlambat, dan
+# tanpa apa pun yang menahan push sebelumnya. `release.yml` dibiarkan apa adanya
+# agar rilis tetap dapat dijalankan meski ada tes yang belum diperbaiki.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# Push ke sebuah branch dan pull request dari branch yang sama memakai
+# `github.ref` yang berbeda, sehingga tanpa grup ini keduanya berjalan
+# bersamaan untuk commit yang sama dan meninggalkan dua status check di PR.
+# Dikunci pada nama branch agar hanya menjalankan yang terbaru.
+concurrency:
+  group: ci-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Typecheck, tes, dan build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      # `npm ci`, bukan `npm install`: versi dependensi persis mengikuti
+      # package-lock.json, dan lockfile yang melenceng dari package.json gagal
+      # di langkah ini alih-alih menghasilkan build yang berbeda dari lokal.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build web assets
+        run: npm run build
