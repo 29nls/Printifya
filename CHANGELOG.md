@@ -2,6 +2,43 @@
 
 All notable changes to Printifya will be documented in this file.
 
+## 1.5.0 (2026-09-25)
+
+### 🚀 Features
+
+- **print-history:** reprint a past job from stored print-ready HTML
+- **print-history:** record every print action
+- **storage:** version stored content and surface write failures
+
+### 🐛 Bug Fixes
+
+- **update:** unduh APK lewat HTTP native, bukan fetch yang diblokir CORS
+- **registry:** give the Fitur Cepat group a real landing page
+- **excel-sheet:** build TODAY/NOW from the same local time base
+
+### 🧪 Tests
+
+- **registry:** mount every group and module under jsdom
+- **registry:** fail CI when a module has no renderable component or no route
+
+### 📝 Documentation
+
+- mark the registry null component finding as fixed
+- update storage spec now that print history is wired and versioned
+- add design spec for versioned storage of user-authored content
+
+### 🔧 CI/CD
+
+- run typecheck, tests, and build on every push and pull request
+
+### 🧹 Chores
+
+- remove tsconfig.tsbuildinfo from tracked files
+- untrack tsconfig.tsbuildinfo
+- fix .gitignore mode (non-executable)
+- ignore tsconfig.tsbuildinfo
+
+
 ## 1.4.0 (2026-09-01)
 
 ### 🚀 Features
