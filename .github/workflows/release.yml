@@ -27,7 +27,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
           cache: "npm"
 
       - name: Setup Java JDK 21
@@ -36,8 +36,13 @@ jobs:
           distribution: "temurin"
           java-version: "21"
 
+      # `packages: platform-tools` ditulis eksplisit: default @v3 menyertakan
+      # paket `tools` yang sudah dihapus dari repositori SDK, sehingga sdkmanager
+      # gagal ("Failed to find package 'tools'") sebelum APK sempat dibangun.
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools"
 
       - name: Install dependencies
         run: npm install

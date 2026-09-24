@@ -31,10 +31,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Node 24, bukan 22: package-lock.json dibuat oleh npm 12 (bawaan Node 24),
+      # sedangkan npm 10 di Node 22 menolaknya dengan galat
+      # "Missing: @esbuild/... from lock file" — kegagalan CI yang tidak
+      # mencerminkan masalah kode, dan hanya muncul di runner.
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
           cache: "npm"
 
       # `npm ci`, bukan `npm install`: versi dependensi persis mengikuti
