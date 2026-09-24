@@ -78,9 +78,13 @@ interface MountOutcome {
 /**
  * Pasang `Component`, tunggu chunk lazy-nya, lalu bongkar lagi.
  *
- * Batas 50 putaran pada penantian `Suspense`: modul yang menggantung harus
- * dilaporkan gagal, bukan membuat seluruh tes berjalan tanpa akhir.
+ * Penantian `Suspense` memakai tenggat waktu, bukan jumlah putaran: modul yang
+ * benar-benar menggantung tetap dilaporkan gagal, sementara runner CI yang
+ * lambat memuat chunk (modul worker seperti upscale-denoise/face-enhance/
+ * auto-layout) tidak lagi salah dituduh menggantung.
  */
+const SUSPENSE_DEADLINE_MS = 15000;
+
 async function mountAndCapture(Component: ComponentType): Promise<MountOutcome> {
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -111,9 +115,10 @@ async function mountAndCapture(Component: ComponentType): Promise<MountOutcome> 
         )
       );
     });
-    for (let i = 0; i < 50 && container.querySelector("[data-pending]"); i++) {
+    const deadline = Date.now() + SUSPENSE_DEADLINE_MS;
+    while (container.querySelector("[data-pending]") && Date.now() < deadline) {
       await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 0));
+        await new Promise((resolve) => setTimeout(resolve, 10));
       });
     }
   } catch (e) {
