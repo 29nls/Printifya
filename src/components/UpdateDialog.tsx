@@ -1,6 +1,13 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { App } from "@capacitor/app";
+import type { PluginListenerHandle } from "@capacitor/core";
 import type { UpdateInfo, DownloadProgress } from "../modules/shared/autoUpdate";
 import {
+  canInstallApk,
+  describeUpdateError,
+  InstallPermissionError,
+  openInstallPermissionSettings,
+  openUpdatePage,
   performUpdate,
   skipVersion,
 } from "../modules/shared/autoUpdate";
@@ -32,22 +39,92 @@ export default function UpdateDialog({
     percent: 0,
   });
   const [errorMsg, setErrorMsg] = useState("");
+  const [needsInstallPermission, setNeedsInstallPermission] = useState(false);
+  const [awaitingPermission, setAwaitingPermission] = useState(false);
+
+  /** Pengguna sedang/baru saja diantar ke Pengaturan izin (dibaca listener di bawah). */
+  const awaitingPermissionRef = useRef(false);
+  /** Update sudah dilanjutkan otomatis — jangan diulang saat kembali lagi. */
+  const autoResumedRef = useRef(false);
 
   // Reset status when updateInfo changes (new version available)
   useEffect(() => {
     setStatus("idle");
     setProgress({ loaded: 0, total: 0, percent: 0 });
     setErrorMsg("");
+    setNeedsInstallPermission(false);
+    setAwaitingPermission(false);
+    awaitingPermissionRef.current = false;
+    autoResumedRef.current = false;
   }, [updateInfo.version]);
 
   const handleUpdate = useCallback(async () => {
     try {
+      awaitingPermissionRef.current = false;
+      autoResumedRef.current = false;
+      setAwaitingPermission(false);
+      setNeedsInstallPermission(false);
       setStatus("downloading");
       await performUpdate(updateInfo, setProgress);
       setStatus("installing");
     } catch (err) {
       setStatus("error");
-      setErrorMsg(err instanceof Error ? err.message : "Gagal mengunduh update");
+      setNeedsInstallPermission(err instanceof InstallPermissionError);
+      setErrorMsg(describeUpdateError(err));
+    }
+  }, [updateInfo]);
+
+  // Izin "Install aplikasi tidak dikenal" tidak bisa diminta lewat dialog biasa,
+  // jadi pengguna diantar langsung ke layar pengaturannya.
+  const handleOpenInstallSettings = useCallback(async () => {
+    try {
+      autoResumedRef.current = false;
+      awaitingPermissionRef.current = true;
+      setAwaitingPermission(true);
+      await openInstallPermissionSettings();
+    } catch (err) {
+      awaitingPermissionRef.current = false;
+      setAwaitingPermission(false);
+      setErrorMsg(describeUpdateError(err));
+    }
+  }, []);
+
+  // Pengguna pergi ke Pengaturan (aplikasi jeda) lalu kembali (aktif) — kalau
+  // izinnya sudah aktif, update dilanjutkan sendiri tanpa menekan Coba Lagi.
+  useEffect(() => {
+    if (status !== "error" || !needsInstallPermission) return;
+
+    let listener: PluginListenerHandle | undefined;
+    let cancelled = false;
+
+    App.addListener("appStateChange", async ({ isActive }) => {
+      if (!isActive || cancelled) return;
+      if (!awaitingPermissionRef.current || autoResumedRef.current) return;
+
+      // Kembali ke aplikasi belum berarti izin diberikan — cek dulu.
+      if (!(await canInstallApk())) return;
+
+      autoResumedRef.current = true;
+      awaitingPermissionRef.current = false;
+      await handleUpdate();
+    }).then((handle) => {
+      if (cancelled) handle.remove();
+      else listener = handle;
+    });
+
+    return () => {
+      cancelled = true;
+      listener?.remove();
+    };
+  }, [status, needsInstallPermission, handleUpdate]);
+
+  // Jalur penyelamat: buka halaman rilis di browser eksternal, agar pengguna
+  // tetap bisa update saat unduhan di aplikasi gagal (mis. koneksi diblokir).
+  const handleOpenPage = useCallback(async () => {
+    try {
+      await openUpdatePage(updateInfo);
+    } catch (err) {
+      setErrorMsg(describeUpdateError(err));
     }
   }, [updateInfo]);
 
@@ -135,9 +212,29 @@ export default function UpdateDialog({
         {status === "error" && (
           <div className="update-error">
             <p>❌ {errorMsg}</p>
-            <button className="btn-retry" onClick={handleUpdate}>
-              Coba Lagi
-            </button>
+            <div className="update-error-actions">
+              <button className="btn-retry" onClick={handleUpdate}>
+                Coba Lagi
+              </button>
+              {needsInstallPermission ? (
+                <button
+                  className="btn-open-page"
+                  onClick={handleOpenInstallSettings}
+                >
+                  Buka Pengaturan
+                </button>
+              ) : (
+                <button className="btn-open-page" onClick={handleOpenPage}>
+                  Buka di Browser
+                </button>
+              )}
+            </div>
+            {awaitingPermission && (
+              <p className="update-hint">
+                Aktifkan izinnya, lalu kembali ke Printifya — update dilanjutkan
+                otomatis.
+              </p>
+            )}
           </div>
         )}
 

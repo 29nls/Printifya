@@ -312,6 +312,33 @@ menginstall update.
 4. User klik **"Update Sekarang"** → APK diunduh → Android installer terbuka
 5. User bisa **skip versi** tertentu ("Nanti Saja") — versi itu tidak akan ditanya lagi
 
+#### Unduhan APK (bebas CORS)
+
+Di Android unduhan APK **tidak** memakai `fetch` WebView: endpoint aset GitHub
+(`release-assets.githubusercontent.com`) tidak mengirim header
+`Access-Control-Allow-Origin`, sehingga `fetch` selalu gagal dengan
+`TypeError: Failed to fetch` di WebView. Karena itu `downloadApk` memakai HTTP
+native (`Filesystem.downloadFile`: mengikuti redirect 302 → signed URL, progres
+byte asli) lalu memverifikasi ukuran file terhadap `fileSize` dari GitHub API
+sebelum diserahkan ke installer. `fetch` hanya dipakai di web atau bila plugin
+native tidak mendukung. Bila semuanya gagal, dialog menawarkan **"Buka di
+Browser"** agar pengguna tetap bisa mengunduh APK dari halaman rilis.
+
+#### Izin pemasangan APK
+
+Android 8+ memblokir pemasangan sampai pengguna mengaktifkan **"Install
+aplikasi tidak dikenal"** untuk Printifya. Karena itu, sebelum mengunduh,
+aplikasi menanya status izin ke plugin native
+(`ApkInstaller.canInstallPackages()`); bila belum aktif, dialog menampilkan
+pesan yang jelas plus tombol **"Buka Pengaturan"** (method
+`openInstallSettings()` membuka `ACTION_MANAGE_UNKNOWN_APP_SOURCES` langsung ke
+halaman aplikasi ini). Efeknya unduhan 3+ MB tidak terbuang hanya untuk
+ditolak installer, dan pengguna tidak perlu mencari sendiri di Pengaturan.
+Begitu izin diaktifkan dan pengguna kembali ke aplikasi (listener
+`appStateChange`), update dilanjutkan otomatis — tanpa menekan "Coba Lagi". APK
+lama yang belum punya kedua method itu tetap berfungsi: izin dianggap ada dan
+installer Android yang memutuskan saat pemasangan.
+
 #### Check Interval
 
 | Trigger | Keterangan |
@@ -427,5 +454,7 @@ App Startup (setiap 6 jam)
 | `src/modules/shared/autoUpdate.ts` | Core update logic + GitHub API parser |
 | `src/components/UpdateDialog.tsx` | UI dialog |
 | `src/components/useAutoUpdate.ts` | React hook |
+| `src/modules/shared/apkInstaller.ts` | Bridge ke plugin native ApkInstaller (install APK + izin pemasangan) |
+| `android/app/src/main/java/com/printifya/app/ApkInstallerPlugin.java` | Plugin native: buka installer, cek izin pemasangan, buka layar pengaturannya |
 | `scripts/release.mjs` | Release automation script |
 | `.github/workflows/release.yml` | GitHub Actions workflow |

@@ -4,6 +4,7 @@ import { Share } from "@capacitor/share";
 import { Preferences } from "@capacitor/preferences";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 import { Capacitor } from "@capacitor/core";
+import type { PluginListenerHandle } from "@capacitor/core";
 import { ApkInstaller } from "./apkInstaller";
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -57,6 +58,12 @@ export interface DownloadProgress {
 const STORAGE_KEY_LAST_CHECK = "printifya.update.lastCheck";
 const STORAGE_KEY_SKIPPED_VERSION = "printifya.update.skipped";
 const DEFAULT_CHECK_INTERVAL = 6 * 60 * 60 * 1000; // 6 hours
+
+/** Folder APK di dalam Directory.Cache (pola sama seperti ApkInstallerPlugin.java). */
+const APK_DIR = "updates";
+
+/** Ukuran minimum APK yang masuk akal; di bawah ini hampir pasti halaman error. */
+const MIN_APK_BYTES = 100 * 1024;
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -239,6 +246,7 @@ function blobToBase64(blob: Blob): Promise<string> {
 /**
  * Resolve the final download URL by following redirects manually.
  * GitHub's browser_download_url redirects through multiple hops.
+ * (Hanya dipakai oleh jalur fetch/web — lihat catatan CORS di downloadApk.)
  */
 async function resolveDownloadUrl(url: string): Promise<string> {
   try {
@@ -269,17 +277,151 @@ async function resolveDownloadUrl(url: string): Promise<string> {
 }
 
 /**
- * Download APK to device filesystem using fetch API.
- * Handles GitHub redirect chains properly.
- * Returns the local file path (relative to Cache directory).
+ * Terjemahkan error teknis unduhan menjadi pesan yang bisa dimengerti pengguna.
+ * "Failed to fetch" adalah pesan generik WebView saat request diblokir
+ * (CORS/jaringan) sehingga perlu dijelaskan, bukan ditampilkan mentah.
+ */
+export function describeUpdateError(err: unknown): string {
+  const raw =
+    err instanceof Error ? err.message : err == null ? "" : String(err);
+  if (/failed to fetch|networkerror|load failed|network request failed/i.test(raw)) {
+    return (
+      "Unduhan gagal karena koneksi ke server update terputus atau diblokir. " +
+      "Periksa internet lalu coba lagi, atau pakai \"Buka di Browser\"."
+    );
+  }
+  if (/abort|timeout/i.test(raw)) {
+    return "Unduhan melebihi batas waktu — koneksi terlalu lambat. Coba lagi.";
+  }
+  return raw || "Gagal mengunduh update.";
+}
+
+/**
+ * Buka halaman rilis di browser eksternal — jalur penyelamat bila unduhan
+ * di dalam aplikasi gagal (pengguna mengunduh APK lewat browser lalu install).
+ */
+export async function openUpdatePage(info: UpdateInfo): Promise<void> {
+  const url = info.releaseUrl ?? info.apkUrl;
+  if (!url) throw new Error("Tidak ada tautan rilis untuk dibuka.");
+
+  if (isNative()) {
+    await Browser.open({ url });
+    return;
+  }
+  window.open(url, "_blank", "noopener");
+}
+
+/**
+ * Unduh APK lewat HTTP native (Filesystem.downloadFile), bukan fetch WebView.
+ *
+ * Alasan: fetch() di WebView tunduk pada CORS, sedangkan endpoint aset GitHub
+ * (release-assets.githubusercontent.com) tidak mengirim header
+ * Access-Control-Allow-Origin — hasilnya TypeError "Failed to fetch". Jalur
+ * native bebas CORS dan sudah mengikuti rantai redirect GitHub 302 → signed URL.
+ */
+async function downloadApkNative(
+  url: string,
+  filename: string,
+  onProgress?: (progress: DownloadProgress) => void,
+  expectedSize?: number,
+): Promise<string> {
+  const relativePath = `${APK_DIR}/${filename}`;
+
+  let listener: PluginListenerHandle | undefined;
+  if (onProgress) {
+    listener = await Filesystem.addListener("progress", (status) => {
+      const total = status.contentLength || expectedSize || 0;
+      onProgress({
+        loaded: status.bytes,
+        total,
+        percent: total > 0 ? Math.round((status.bytes / total) * 100) : 0,
+      });
+    });
+  }
+
+  try {
+    await Filesystem.downloadFile({
+      url,
+      path: relativePath,
+      directory: Directory.Cache,
+      recursive: true,
+      progress: true,
+      headers: { Accept: "application/octet-stream" },
+    });
+  } finally {
+    await listener?.remove();
+  }
+
+  // Jalur native tidak memeriksa status HTTP (halaman error ikut tertulis),
+  // jadi ukurannya diverifikasi sebelum diserahkan ke installer.
+  const { size } = await Filesystem.stat({
+    path: relativePath,
+    directory: Directory.Cache,
+  });
+
+  if (expectedSize && expectedSize > 0 && size !== expectedSize) {
+    throw new Error(
+      `Unduhan tidak lengkap (${size} dari ${expectedSize} byte). Coba lagi.`,
+    );
+  }
+  if (size < MIN_APK_BYTES) {
+    throw new Error(`File APK tidak valid (${size} byte). Coba lagi.`);
+  }
+
+  onProgress?.({ loaded: size, total: size, percent: 100 });
+  return relativePath;
+}
+
+/**
+ * Apakah errornya berarti "plugin tidak bisa mengunduh sama sekali" (bukan
+ * kegagalan unduhan nyata)? Hanya kasus ini yang layak dicoba lewat fetch.
+ */
+function isNativeDownloadUnavailable(err: unknown): boolean {
+  if (typeof Filesystem.downloadFile !== "function") return true;
+  const message = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return (
+    message.includes("not implemented") ||
+    message.includes("unimplemented") ||
+    message.includes("not available") ||
+    message.includes("unknown method")
+  );
+}
+
+/**
+ * Unduh APK ke device filesystem. Di Android memakai HTTP native (tanpa CORS),
+ * dengan jalur fetch sebagai cadangan; di web hanya fetch yang tersedia.
+ * Mengembalikan path lokal file (relatif terhadap direktori Cache).
  */
 export async function downloadApk(
   url: string,
   filename: string,
   onProgress?: (progress: DownloadProgress) => void,
+  expectedSize?: number,
 ): Promise<string> {
   onProgress?.({ loaded: 0, total: 0, percent: 0 });
 
+  if (isNative()) {
+    try {
+      return await downloadApkNative(url, filename, onProgress, expectedSize);
+    } catch (err) {
+      // Kegagalan unduhan nyata diteruskan apa adanya — fetch di WebView tetap
+      // diblokir CORS untuk aset GitHub, jadi menutupinya hanya menyamarkan sebab.
+      if (!isNativeDownloadUnavailable(err)) throw err;
+    }
+  }
+
+  return downloadApkViaFetch(url, filename, onProgress);
+}
+
+/**
+ * Jalur unduhan berbasis fetch — dipakai di web dan sebagai cadangan di native.
+ * Membaca body sebagai stream sehingga progres byte bisa dilaporkan.
+ */
+async function downloadApkViaFetch(
+  url: string,
+  filename: string,
+  onProgress?: (progress: DownloadProgress) => void,
+): Promise<string> {
   // Step 1: Resolve the final download URL (follow GitHub redirects)
   let finalUrl = url;
   try {
@@ -356,11 +498,11 @@ export async function downloadApk(
     // Step 3: Convert to base64 and write to filesystem
     const blob = new Blob([combined], { type: "application/vnd.android.package-archive" });
     const base64Data = await blobToBase64(blob);
-    const filePath = `updates/${filename}`;
+    const filePath = `${APK_DIR}/${filename}`;
 
     try {
       await Filesystem.mkdir({
-        path: "updates",
+        path: APK_DIR,
         directory: Directory.Cache,
         recursive: true,
       });
@@ -386,10 +528,69 @@ export async function downloadApk(
 
 // ── Install APK ────────────────────────────────────────────────────────────
 
+/**
+ * Android 8+ memblokir pemasangan APK sampai pengguna mengaktifkan
+ * "Install aplikasi tidak dikenal" untuk Printifya. Error ini dibedakan supaya
+ * dialog bisa menawarkan tombol "Buka Pengaturan" alih-alih pesan generik.
+ */
+export class InstallPermissionError extends Error {
+  constructor() {
+    super(
+      "Android memblokir pemasangan: aktifkan izin \"Install aplikasi tidak " +
+        "dikenal\" untuk Printifya. Update lanjut otomatis setelah Anda kembali " +
+        "ke aplikasi — atau tekan Coba Lagi.",
+    );
+    this.name = "InstallPermissionError";
+  }
+}
+
+/**
+ * Apakah aplikasi boleh memasang APK? APK lama (tanpa method native ini)
+ * dianggap boleh — installer-lah yang akan memutuskan saat itu juga.
+ */
+export async function canInstallApk(): Promise<boolean> {
+  if (!isNative()) return false;
+  if (typeof ApkInstaller.canInstallPackages !== "function") return true;
+
+  try {
+    const result = await ApkInstaller.canInstallPackages();
+    return result?.granted !== false;
+  } catch {
+    // Sekali error jangan kunci pengguna: biarkan installer Android memutuskan.
+    return true;
+  }
+}
+
+/**
+ * Buka layar pengaturan izin pemasangan ("Install aplikasi tidak dikenal")
+ * untuk aplikasi ini, sehingga pengguna tidak perlu mencarinya sendiri.
+ */
+export async function openInstallPermissionSettings(): Promise<void> {
+  if (typeof ApkInstaller.openInstallSettings !== "function") {
+    throw new Error(
+      "Buka Pengaturan Android → Aplikasi → Printifya → Install aplikasi tidak dikenal.",
+    );
+  }
+  await ApkInstaller.openInstallSettings();
+}
+
+/**
+ * Lempar InstallPermissionError bila izin pemasangan belum ada. Dipanggil
+ * sebelum unduhan dimulai agar unduhan besar tidak terbuang sia-sia.
+ */
+export async function ensureInstallPermission(): Promise<void> {
+  if (!isNative()) return;
+  if (await canInstallApk()) return;
+  throw new InstallPermissionError();
+}
+
 export async function promptInstall(filePath: string): Promise<void> {
   if (!isNative()) {
     throw new Error("Auto-update hanya tersedia di aplikasi Android");
   }
+
+  // Izin bisa dicabut lagi setelah unduhan selesai — cek ulang sebelum install.
+  await ensureInstallPermission();
 
   // Strategy 1: Native ApkInstaller plugin with content URI
   try {
@@ -437,10 +638,15 @@ export async function performUpdate(
   const filename = `printifya-${updateInfo.version}.apk`;
 
   if (updateInfo.apkUrl) {
+    // Izin pemasangan dicek sebelum unduhan: tanpa izin, unduhan 3+ MB hanya
+    // berakhir di penolakan installer.
+    await ensureInstallPermission();
+
     const filePath = await downloadApk(
       updateInfo.apkUrl,
       filename,
       onProgress,
+      updateInfo.fileSize,
     );
     await promptInstall(filePath);
   } else if (updateInfo.releaseUrl) {

@@ -184,6 +184,13 @@
   font-size: 14px;
 }
 
+.update-error-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
 .btn-retry {
   background: #e03131;
   color: #fff;
@@ -197,6 +204,28 @@
 
 .btn-retry:hover {
   background: #c92a2a;
+}
+
+.btn-open-page {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  padding: 7px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.btn-open-page:hover {
+  background: var(--bg);
+}
+
+.update-hint {
+  margin: 10px 0 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 /* Actions */

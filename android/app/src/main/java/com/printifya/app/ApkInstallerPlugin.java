@@ -3,6 +3,7 @@ package com.printifya.app;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
+import android.provider.Settings;
 
 import androidx.core.content.FileProvider;
 
@@ -26,6 +27,11 @@ public class ApkInstallerPlugin extends Plugin {
         }
 
         try {
+            if (!canRequestPackageInstalls()) {
+                call.reject("INSTALL_PERMISSION_DENIED: izin 'Install aplikasi tidak dikenal' belum aktif untuk aplikasi ini");
+                return;
+            }
+
             Uri fileUri;
 
             if (path.startsWith("content://")) {
@@ -62,6 +68,55 @@ public class ApkInstallerPlugin extends Plugin {
             call.resolve(result);
         } catch (Exception e) {
             call.reject("Failed to open APK installer: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Apakah aplikasi boleh memasang APK? Android 8+ mewajibkan izin per-aplikasi
+     * "Install unknown apps"; sebelum Android 8 tidak ada batasan.
+     */
+    private boolean canRequestPackageInstalls() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            return getContext().getPackageManager().canRequestPackageInstalls();
+        }
+        return true;
+    }
+
+    /**
+     * Dipanggil JS sebelum mengunduh: tahu lebih awal apakah izin pemasangan
+     * sudah ada, sehingga unduhan tidak sia-sia.
+     */
+    @PluginMethod
+    public void canInstallPackages(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("granted", canRequestPackageInstalls());
+        call.resolve(result);
+    }
+
+    /**
+     * Buka layar pengaturan izin pemasangan untuk aplikasi ini, agar pengguna
+     * tidak perlu mencari sendiri di Pengaturan Android.
+     */
+    @PluginMethod
+    public void openInstallSettings(PluginCall call) {
+        try {
+            Intent intent;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                intent = new Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:" + getContext().getPackageName())
+                );
+            } else {
+                intent = new Intent(Settings.ACTION_SECURITY_SETTINGS);
+            }
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+
+            JSObject result = new JSObject();
+            result.put("success", true);
+            call.resolve(result);
+        } catch (Exception e) {
+            call.reject("Failed to open install settings: " + e.getMessage(), e);
         }
     }
 
