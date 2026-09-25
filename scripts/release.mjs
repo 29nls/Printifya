@@ -23,6 +23,21 @@ import { fileURLToPath } from "url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
 
+// Slug repo diturunkan dari remote git alih-alih ditulis ulang di dua tempat:
+// alamat yang di-hardcode sempat menunjuk repo yang tidak ada
+// (printifya/printifya-app), sehingga ringkasan rilis menyesatkan.
+function getRepoSlug() {
+  try {
+    const url = execSync("git config --get remote.origin.url", { cwd: ROOT, encoding: "utf-8" }).trim();
+    const match = url.match(/github\.com[/:]([^/]+)\/(.+?)(\.git)?$/);
+    if (match) return `${match[1]}/${match[2]}`;
+  } catch {
+    /* remote tidak tersedia, mis. checkout tanpa git */
+  }
+  return "29nls/Printifya";
+}
+const REPO_SLUG = getRepoSlug();
+
 // ── Parse Arguments ──────────────────────────────────────────────────
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
@@ -112,7 +127,9 @@ async function release() {
   const pkg = JSON.parse(read("package.json"));
   const oldVersion = pkg.version;
   pkg.version = version;
-  write("package.json", JSON.stringify(pkg, null, 2) + "\n");
+  // `--dry-run` tidak boleh menyentuh berkas: sebelumnya dua langkah ini selalu
+  // menulis, sehingga "dry run" tetap mengubah package.json dan build.gradle.
+  if (!dryRun) write("package.json", JSON.stringify(pkg, null, 2) + "\n");
   console.log(`   ${oldVersion} → ${version}`);
 
   // 2. Bump android/app/build.gradle
@@ -122,9 +139,24 @@ async function release() {
   const [major, minor, patch] = version.split(".").map(Number);
   const newCode = major * 10000 + minor * 100 + patch;
   gradle = gradle.replace(/versionCode\s+\d+/, `versionCode ${newCode}`);
-  write("android/app/build.gradle", gradle);
+  if (!dryRun) write("android/app/build.gradle", gradle);
   console.log(`   versionName: ${version}`);
   console.log(`   versionCode: ${newCode}`);
+
+  // 2b. Bump package-lock.json
+  // Lockfile yang tertinggal di versi lama sementara package.json sudah maju
+  // adalah persis jenis selisih yang dulu membuat `npm ci` di CI gagal.
+  console.log("\n🔒 Updating package-lock.json...");
+  const lockPath = resolve(ROOT, "package-lock.json");
+  if (existsSync(lockPath)) {
+    const lock = JSON.parse(read("package-lock.json"));
+    lock.version = version;
+    if (lock.packages && lock.packages[""]) lock.packages[""].version = version;
+    if (!dryRun) write("package-lock.json", JSON.stringify(lock, null, 2) + "\n");
+    console.log(`   ${oldVersion} → ${version}`);
+  } else {
+    console.log("   (tidak ada package-lock.json)");
+  }
 
   // 3. Generate changelog
   console.log("\n📋 Generating changelog...");
@@ -210,13 +242,13 @@ async function release() {
   // 9. Git commit + push
   if (!localOnly && !noPush && !dryRun) {
     console.log("\n📝 Creating git commit...");
-    runVerbose("git add package.json android/app/build.gradle CHANGELOG.md");
+    runVerbose("git add package.json package-lock.json android/app/build.gradle CHANGELOG.md");
     runVerbose(`git commit -m "chore: release v${version}"`);
     console.log("\n⬆️  Pushing to GitHub...");
     runVerbose("git push");
   } else if (!localOnly && !dryRun) {
     console.log("\n📝 Creating git commit (no push)...");
-    runVerbose("git add package.json android/app/build.gradle CHANGELOG.md");
+    runVerbose("git add package.json package-lock.json android/app/build.gradle CHANGELOG.md");
     runVerbose(`git commit -m "chore: release v${version}"`);
   }
 
@@ -236,7 +268,7 @@ async function release() {
   if (!localOnly && !dryRun && !noPush) {
     console.log("\n🌐 GitHub Release will be created automatically by CI...");
     console.log(`   Tag ${tag} pushed → CI triggers release workflow`);
-    console.log(`   Release URL: https://github.com/29nls/Printifya/releases/tag/${tag}`);
+    console.log(`   Release URL: https://github.com/${REPO_SLUG}/releases/tag/${tag}`);
   }
 
   // 12. Cleanup
@@ -257,7 +289,7 @@ async function release() {
   console.log(`   APK: ${apkPath ? basename(apkPath) : "N/A"}`);
   if (!localOnly && !noPush) {
     console.log(`   Git: Pushed to GitHub`);
-    console.log(`   Release: https://github.com/printifya/printifya-app/releases/tag/${tag}`);
+    console.log(`   Release: https://github.com/${REPO_SLUG}/releases/tag/${tag}`);
   }
   console.log("═".repeat(40));
 }
