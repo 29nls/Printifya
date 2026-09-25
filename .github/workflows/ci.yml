@@ -26,17 +26,23 @@ permissions:
 jobs:
   verify:
     name: Typecheck, tes, dan build
+    # Tanpa langkah khusus citra: Node dan npm datang dari setup-node, dan job ini
+    # tidak menyentuh paket sistem. Migrasi label ubuntu-latest ke Ubuntu 26.04
+    # (19 Okt–19 Nov 2026) karena itu tidak mengubah apa pun di sini — yang
+    # bergantung pada isi citra hanya job Android di release.yml.
     runs-on: ubuntu-latest
     steps:
+      # Node 24 di kedua action: versi @v4-nya masih menargetkan Node 20 yang
+      # sudah deprecated di runner GitHub.
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Node 24, bukan 22: package-lock.json dibuat oleh npm 12 (bawaan Node 24),
       # sedangkan npm 10 di Node 22 menolaknya dengan galat
       # "Missing: @esbuild/... from lock file" — kegagalan CI yang tidak
       # mencerminkan masalah kode, dan hanya muncul di runner.
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: "npm"

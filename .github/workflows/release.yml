@@ -10,28 +10,48 @@ on:
         description: "Version to release (e.g., 1.2.0)"
         required: true
         type: string
+      # Dua input berikut dipakai untuk menguji seluruh alur rilis tanpa
+      # menerbitkan apa pun: `runner` menjalankan job di citra lain (mis.
+      # ubuntu-26.04, pengganti ubuntu-latest mulai 19 Okt 2026), `publish: false`
+      # menahan langkah Create Release agar aset rilis yang sudah ada tidak ditimpa.
+      runner:
+        description: "Runner label, mis. ubuntu-26.04 untuk menguji citra berikutnya"
+        required: false
+        default: "ubuntu-latest"
+        type: string
+      publish:
+        description: "Terbitkan GitHub Release setelah APK terbangun"
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: write
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    # Pada push tag `inputs.runner` kosong, sehingga `||` mengembalikannya ke
+    # ubuntu-latest; hanya workflow_dispatch yang bisa memilih runner lain.
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     
     steps:
+      # Semua action di berkas ini memakai runtime Node 24. Versi sebelumnya
+      # (checkout@v4, setup-node@v4, setup-java@v4, setup-android@v3,
+      # upload-artifact@v4, action-gh-release@v1) menargetkan Node 20 yang sudah
+      # deprecated di runner GitHub dan dipaksa jalan di Node 24.
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0  # Full history needed for changelog generation
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: "npm"
 
       - name: Setup Java JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: "temurin"
           java-version: "21"
@@ -40,8 +60,9 @@ jobs:
       # cmdline-tools terbaru, menerima lisensi, dan menaruh `sdkmanager` di PATH.
       # Daftar bawaan @v3 ("tools platform-tools") berisi paket `tools` yang sudah
       # dihapus dari repositori SDK, sehingga sdkmanager gagal ("Failed to find
-      # package 'tools'") sebelum APK sempat dibangun. Paket dipasang di langkah
-      # berikutnya, bukan di sini.
+      # package 'tools'") sebelum APK sempat dibangun. @v4 sudah memperbaiki
+      # bawaannya, tetapi paket tetap dipasang di langkah sendiri supaya isi SDK
+      # tidak bergantung pada default action mana pun.
       #
       # Untuk tag lama: GitHub membaca berkas workflow ini dari commit yang di-tag,
       # bukan dari `main`. Tag yang dibuat sebelum perbaikan di atas (mis. v1.5.0)
@@ -49,7 +70,7 @@ jobs:
       # ulang — rilis atau perbaikan untuk tag seperti itu harus dijalankan lewat
       # `workflow_dispatch` dari `main`, bukan lewat re-run pada tag.
       - name: Setup Android SDK tools
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
         with:
           packages: ""
 
@@ -58,6 +79,8 @@ jobs:
       # sedangkan daftar bawaan action mengikuti keputusan Google.
       # Kalau AGP 8.13.0 (android/build.gradle) meminta build-tools atau platform
       # lain, Gradle memasangnya sendiri karena lisensi sudah diterima di atas.
+      # Tidak ada jalur SDK yang di-hardcode, jadi langkah ini tidak ikut berubah
+      # saat citra runner berganti (ubuntu-latest → Ubuntu 26.04).
       - name: Install Android SDK packages
         run: |
           sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;36.0.0"
@@ -143,8 +166,11 @@ jobs:
           echo "apk_size=$APK_SIZE" >> $GITHUB_OUTPUT
           echo "Found APK: $(basename "$APK_FILE") ($APK_SIZE bytes)"
 
+      # Input `publish` hanya bisa datang dari workflow_dispatch; push tag selalu
+      # terbit, sedangkan pemanggilan manual bisa berhenti di artifact APK.
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish }}
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: Printifya ${{ steps.version.outputs.version }}
@@ -157,7 +183,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Printifya-${{ steps.version.outputs.version }}
           path: ${{ steps.apk.outputs.apk_path }}
