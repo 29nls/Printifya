@@ -198,6 +198,7 @@ jobs:
       # ditulis utuh dan tidak bergantung pada jenis event pemanggil, karena pada
       # workflow_call `github.event_name` adalah event pemanggil itu sendiri.
       - name: Create Release
+        id: release
         if: ${{ (github.event_name == 'push' && github.ref_type == 'tag') || inputs.publish }}
         uses: softprops/action-gh-release@v3
         with:
@@ -213,6 +214,17 @@ jobs:
           # dipanggil lewat workflow_call (canary di ci.yml), secret itu belum
           # tentu diteruskan pemanggil, sedangkan `github.token` selalu ada.
           GITHUB_TOKEN: ${{ github.token }}
+
+      # Jaring pengaman untuk push tag: bila kondisi di atas nanti salah diedit,
+      # job gagal di sini alih-alih meninggalkan tag yang diam-diam tanpa rilis —
+      # pemikiran yang tidak terlihat jauh lebih mahal daripada satu langkah ini.
+      - name: Pastikan rilis tag benar-benar terbit
+        if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
+        run: |
+          if [ "${{ steps.release.outcome }}" != "success" ]; then
+            echo "::error::Push tag ${{ github.ref_name }} tidak menerbitkan rilis (Create Release: ${{ steps.release.outcome }})"
+            exit 1
+          fi
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v7
