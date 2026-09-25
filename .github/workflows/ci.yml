@@ -61,3 +61,19 @@ jobs:
 
       - name: Build web assets
         run: npm run build
+
+  android-canary:
+    name: Bangun APK rilis (tanpa terbit)
+    # Canary: menjalankan alur rilis yang sesungguhnya — pemasangan SDK, cap sync,
+    # Gradle assembleRelease — pada setiap push ke main, bukan pada saat tag
+    # sedang dipotong. Job ini memakai berkas workflow rilis lewat workflow_call,
+    # bukan menyalin langkahnya, supaya yang diuji benar-benar jalur rilis.
+    # `publish` bawaan workflow_call adalah false sehingga GitHub Release tidak
+    # pernah tersentuh; hanya push tag dan dispatch yang boleh menerbitkan.
+    # Hanya di main: pull request tidak perlu membayar build Android.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/release.yml
+    with:
+      publish: false
+    permissions:
+      contents: read

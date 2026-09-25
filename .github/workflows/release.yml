@@ -24,6 +24,25 @@ on:
         required: false
         default: true
         type: boolean
+  # Dipakai job canary di ci.yml: langkah yang sama persis dijalankan pada setiap
+  # push ke main, tetapi `publish` bawaannya false — pemanggil harus memintanya
+  # dengan sadar sebelum ada rilis yang benar-benar terbit.
+  workflow_call:
+    inputs:
+      version:
+        description: "Versi untuk changelog; kosong = dari tag atau package.json"
+        required: false
+        type: string
+      runner:
+        description: "Runner label"
+        required: false
+        default: "ubuntu-latest"
+        type: string
+      publish:
+        description: "Terbitkan GitHub Release"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -89,14 +108,22 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      # Versi datang dari input (dispatch atau pemanggilan canary), dari nama tag
+      # (push tag), atau dari package.json saat pemanggil tidak memilih versi.
+      # `inputs` dipakai, bukan `github.event.inputs`: konteks itu kosong pada
+      # pemanggilan workflow_call dari ci.yml.
       - name: Get version
         id: version
         run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
           else
-            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+            VERSION="$(node -p "require('./package.json').version")"
           fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Versi yang dipakai: $VERSION"
 
       - name: Generate changelog from commits
         id: changelog
@@ -166,10 +193,12 @@ jobs:
           echo "apk_size=$APK_SIZE" >> $GITHUB_OUTPUT
           echo "Found APK: $(basename "$APK_FILE") ($APK_SIZE bytes)"
 
-      # Input `publish` hanya bisa datang dari workflow_dispatch; push tag selalu
-      # terbit, sedangkan pemanggilan manual bisa berhenti di artifact APK.
+      # Push tag selalu menerbitkan; pemanggilan manual (dispatch atau canary CI)
+      # hanya menerbitkan bila `publish` diminta secara eksplisit. Kondisinya
+      # ditulis utuh dan tidak bergantung pada jenis event pemanggil, karena pada
+      # workflow_call `github.event_name` adalah event pemanggil itu sendiri.
       - name: Create Release
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish }}
+        if: ${{ (github.event_name == 'push' && github.ref_type == 'tag') || inputs.publish }}
         uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ steps.version.outputs.version }}
@@ -180,7 +209,10 @@ jobs:
           draft: false
           prerelease: false
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # `github.token`, bukan `secrets.GITHUB_TOKEN`: saat workflow ini
+          # dipanggil lewat workflow_call (canary di ci.yml), secret itu belum
+          # tentu diteruskan pemanggil, sedangkan `github.token` selalu ada.
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v7
