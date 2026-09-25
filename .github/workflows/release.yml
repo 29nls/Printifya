@@ -36,13 +36,32 @@ jobs:
           distribution: "temurin"
           java-version: "21"
 
-      # `packages: platform-tools` ditulis eksplisit: default @v3 menyertakan
-      # paket `tools` yang sudah dihapus dari repositori SDK, sehingga sdkmanager
-      # gagal ("Failed to find package 'tools'") sebelum APK sempat dibangun.
-      - name: Setup Android SDK
+      # `packages: ""` bukan kelalaian: action ini hanya dipakai untuk memasang
+      # cmdline-tools terbaru, menerima lisensi, dan menaruh `sdkmanager` di PATH.
+      # Daftar bawaan @v3 ("tools platform-tools") berisi paket `tools` yang sudah
+      # dihapus dari repositori SDK, sehingga sdkmanager gagal ("Failed to find
+      # package 'tools'") sebelum APK sempat dibangun. Paket dipasang di langkah
+      # berikutnya, bukan di sini.
+      #
+      # Untuk tag lama: GitHub membaca berkas workflow ini dari commit yang di-tag,
+      # bukan dari `main`. Tag yang dibuat sebelum perbaikan di atas (mis. v1.5.0)
+      # karena itu selalu menjalankan versi lama dan tetap gagal walau dijalankan
+      # ulang — rilis atau perbaikan untuk tag seperti itu harus dijalankan lewat
+      # `workflow_dispatch` dari `main`, bukan lewat re-run pada tag.
+      - name: Setup Android SDK tools
         uses: android-actions/setup-android@v3
         with:
-          packages: "platform-tools"
+          packages: ""
+
+      # Paket yang dibutuhkan build dipasang eksplisit, bukan lewat daftar bawaan
+      # action: `compileSdk 36` di android/variables.gradle tidak berubah,
+      # sedangkan daftar bawaan action mengikuti keputusan Google.
+      # Kalau AGP 8.13.0 (android/build.gradle) meminta build-tools atau platform
+      # lain, Gradle memasangnya sendiri karena lisensi sudah diterima di atas.
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          sdkmanager --list_installed
 
       - name: Install dependencies
         run: npm install
