@@ -75,5 +75,11 @@ jobs:
     uses: ./.github/workflows/release.yml
     with:
       publish: false
+    # `contents: write`, bukan `read`: GitHub memvalidasi izin job pemanggil
+    # terhadap izin yang diminta berkas yang dipanggil, bukan mengambil
+    # irisan keduanya — dengan `read` di sini workflow gagal sebelum job dimulai
+    # ("The workflow is requesting 'contents: write', but is only allowed
+    # 'contents: read'"). Karena `publish` false, tidak ada langkah yang memakai
+    # izin tulis itu; hanya step Create Release yang dilewati.
     permissions:
-      contents: read
+      contents: write
