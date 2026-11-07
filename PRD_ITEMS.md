@@ -58,10 +58,10 @@ File ini dirancang untuk dijalankan oleh **Autonomous AI Agent Loop** dengan kri
 
 ## Fase 3: Image Studio & Processing Enhancements
 
-- [ ] ITEM-008: Photo Studio — Filter Warna Lanjutan & Efek Pas Foto (WebGL/Canvas)
+- [x] ITEM-008: Photo Studio — Filter Warna Lanjutan & Efek Pas Foto (WebGL/Canvas)
   - **Deskripsi PRD**: Pengguna dapat mengubah kecerahan, kontras, saturasi, grayscale, dan filter warm/cool secara real-time pada editor pas foto.
   - **Boundary**: Proses manipulasi piksel harus non-blocking (bisa melalui helper murni atau WebWorker) dan menjaga DPI 300 saat diekspor.
-  - **Verifikasi**: Unit test algoritma manipulasi ImageData (`adjustImageParams.test.ts`) menghasilkan nilai piksel yang diharapkan (`exit 0`).
+  - **Verifikasi**: npx vitest run src/modules/photo-studio/shared/adjustImageParams.test.ts
 
 - [ ] ITEM-009: Photo Studio — Watermark & Metadata Stamping
   - **Deskripsi PRD**: Fitur opsional untuk menyematkan watermark teks/logo studio dan tanggal foto pada sudut cetakan pas foto.
