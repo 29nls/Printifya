@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { applyColorFilters, type ColorFilterParams } from "./adjustImageParams";
+import { applyColorFilters } from "./adjustImageParams";
 
 describe("adjustImageParams (Pixel manipulation)", () => {
   it("tidak mengubah piksel jika parameter filter default (semua 0)", () => {

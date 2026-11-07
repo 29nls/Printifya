@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { CloudStorageAdapter, type SyncRecord } from "./cloudStorageAdapter";
+import { CloudStorageAdapter } from "./cloudStorageAdapter";
 
 describe("CloudStorageAdapter (Offline-first & Cloud Sync)", () => {
   it("bekerja secara offline-first tanpa memerlukan token autentikasi", async () => {

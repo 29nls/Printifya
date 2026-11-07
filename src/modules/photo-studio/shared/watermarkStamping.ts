@@ -91,7 +91,6 @@ export function stampWatermarkOnCanvas(
     fontSize = 12,
     fontColor = "#333333",
     position = "bottom-right",
-    padding = 16,
   } = options;
 
   const coords = calculateWatermarkCoordinates(width, height, text, options);

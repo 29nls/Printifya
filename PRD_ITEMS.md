@@ -77,7 +77,7 @@ File ini dirancang untuk dijalankan oleh **Autonomous AI Agent Loop** dengan kri
   - **Boundary**: Mode offline lokal tetap menjadi default utama; sinkronisasi awan adalah fitur opt-in yang tidak memutus alur tanpa internet.
   - **Verifikasi**: npx vitest run src/modules/cloud-sync/cloudStorageAdapter.test.ts
 
-- [ ] ITEM-011: Multi-User & Audit Logging
+- [x] ITEM-011: Multi-User & Audit Logging
   - **Deskripsi PRD**: Pencatatan kuota cetak dan log aktivitas cetak per pengguna (khusus skenario kantor/sekolah).
   - **Boundary**: Data sensitif tidak boleh tercatat secara plain-text dalam audit log.
-  - **Verifikasi**: Unit test enkripsi & pembuatan log audit terstruktur (`exit 0`).
+  - **Verifikasi**: npx vitest run src/modules/audit-log/multiUserAudit.test.ts
