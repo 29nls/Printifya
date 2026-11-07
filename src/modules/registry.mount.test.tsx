@@ -145,7 +145,15 @@ async function mountAndCapture(Component: ComponentType): Promise<MountOutcome> 
 afterEach(() => {
   // Modul boleh menulis preferensi saat mount; bersihkan agar tiap modul
   // di-mount dari kondisi awal yang sama.
-  localStorage.clear();
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      window.localStorage.clear();
+    } else if (typeof localStorage !== "undefined" && localStorage && typeof localStorage.clear === "function") {
+      localStorage.clear();
+    }
+  } catch {
+    /* fallback jika localStorage tidak tersedia di env tes */
+  }
 });
 
 describe("mount semua grup dan modul", () => {
