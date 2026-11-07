@@ -7,6 +7,7 @@ import {
   type QzState,
 } from "./qzClient";
 import { WebUsbPrinterDriver } from "../webusb/webUsbPrinter";
+import { BlePrinterDriver } from "../ble/blePrinter";
 import "../../photo-studio/shared/style.css";
 import "./style.css";
 
@@ -26,6 +27,13 @@ export default function QzTrayPage() {
   const [usbDeviceName, setUsbDeviceName] = useState<string | null>(null);
   const [usbStatusMsg, setUsbStatusMsg] = useState("");
   const isUsbSupported = usbDriverRef.current.isSupported();
+
+  // State Web Bluetooth (BLE) Driver
+  const bleDriverRef = useRef<BlePrinterDriver>(new BlePrinterDriver());
+  const [bleConnected, setBleConnected] = useState(false);
+  const [bleDeviceName, setBleDeviceName] = useState<string | null>(null);
+  const [bleStatusMsg, setBleStatusMsg] = useState("");
+  const isBleSupported = bleDriverRef.current.isSupported();
 
   const addLog = (msg: string) => {
     const next = [...logsRef.current, `${new Date().toLocaleTimeString("id-ID")} ${msg}`].slice(-40);
@@ -135,6 +143,61 @@ export default function QzTrayPage() {
     }
   };
 
+  const handleConnectBle = async () => {
+    setBusy(true);
+    try {
+      bleDriverRef.current.onDisconnect(() => {
+        setBleConnected(false);
+        setBleDeviceName(null);
+        setBleStatusMsg("Koneksi BLE terputus.");
+        addLog("[BLE] Perangkat Bluetooth terputus.");
+      });
+      const res = await bleDriverRef.current.requestAndConnect();
+      setBleStatusMsg(res.message);
+      if (res.ok) {
+        setBleConnected(true);
+        setBleDeviceName(bleDriverRef.current.getConnectedDeviceName());
+        addLog(`[BLE] ${res.message}`);
+      } else {
+        setBleConnected(false);
+        setBleDeviceName(null);
+        addLog(`[BLE Error] ${res.message}`);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDisconnectBle = () => {
+    bleDriverRef.current.disconnect();
+    setBleConnected(false);
+    setBleDeviceName(null);
+    setBleStatusMsg("Koneksi Bluetooth diputus.");
+    addLog("[BLE] Perangkat Bluetooth diputus.");
+  };
+
+  const handleTestPrintBle = async () => {
+    if (!bleConnected) return;
+    setBusy(true);
+    try {
+      const base64 = escposText("PRINTIFYA - BLUETOOTH", testText || "Tes Cetak BLE");
+      const binaryStr = atob(base64);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+      const res = await bleDriverRef.current.print(bytes);
+      setBleStatusMsg(res.message);
+      addLog(`[BLE] ${res.message}`);
+    } catch (e) {
+      const err = e instanceof Error ? e.message : String(e);
+      setBleStatusMsg(`Gagal cetak BLE: ${err}`);
+      addLog(`[BLE Error] ${err}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="qz-page">
       <header className="module-header">
@@ -227,6 +290,55 @@ export default function QzTrayPage() {
                   disabled={busy}
                 >
                   ⏹️ Lepas USB
+                </button>
+              </>
+            )}
+          </div>
+        </section>
+
+        <section className="panel">
+          <h2>Driver Web Bluetooth (BLE Thermal)</h2>
+          <div className={`qz-status ${bleConnected ? "qz-connected" : "qz-idle"}`}>
+            <span className="qz-dot" />
+            <div>
+              <strong>
+                {bleConnected ? `Terhubung: ${bleDeviceName}` : isBleSupported ? "Siap Dipasangkan" : "Tidak Didukung"}
+              </strong>
+              <p>
+                {bleStatusMsg ||
+                  (isBleSupported
+                    ? "Hubungkan printer thermal mobile Bluetooth (ESC/POS) langsung dari browser."
+                    : "Browser ini belum mendukung Web Bluetooth. Gunakan Chrome/Edge di desktop atau Android.")}
+              </p>
+            </div>
+          </div>
+          <div className="qz-actions">
+            {!bleConnected ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleConnectBle}
+                disabled={busy || !isBleSupported}
+              >
+                📶 Sambung Bluetooth
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleTestPrintBle}
+                  disabled={busy}
+                >
+                  🖨️ Tes Cetak BLE
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={handleDisconnectBle}
+                  disabled={busy}
+                >
+                  ⏹️ Putus BLE
                 </button>
               </>
             )}

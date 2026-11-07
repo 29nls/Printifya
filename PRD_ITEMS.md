@@ -44,10 +44,10 @@ File ini dirancang untuk dijalankan oleh **Autonomous AI Agent Loop** dengan kri
   - **Boundary**: Harus memiliki fallback deteksi otomatis jika WebUSB ditolak/tidak didukung oleh OS (misal Windows claim error).
   - **Verifikasi**: npx vitest run src/modules/print-center/webusb/webUsbPrinter.test.ts
 
-- [ ] ITEM-006: Koneksi Printer — Driver Web Bluetooth (BLE ESC/POS)
+- [x] ITEM-006: Koneksi Printer — Driver Web Bluetooth (BLE ESC/POS)
   - **Deskripsi PRD**: Dukungan cetak langsung ke thermal / portable printer via Web Bluetooth API.
   - **Boundary**: Penanganan graceful disconnect & perizinan browser.
-  - **Verifikasi**: Unit test `blePrinter.test.ts` yang memvalidasi pembentukan buffer ESC/POS dan pemanggilan `navigator.bluetooth` mock (`exit 0`).
+  - **Verifikasi**: npx vitest run src/modules/print-center/ble/blePrinter.test.ts
 
 - [ ] ITEM-007: Print Center — Real IPP Protocol Packet Builder
   - **Deskripsi PRD**: Saat ini modul printer jaringan hanya menggunakan `no-cors` ping heuristik. Implementasikan packet encoder IPP v1.1/v2.0 murni (Get-Printer-Attributes & Print-Job).
