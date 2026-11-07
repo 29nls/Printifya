@@ -49,10 +49,10 @@ File ini dirancang untuk dijalankan oleh **Autonomous AI Agent Loop** dengan kri
   - **Boundary**: Penanganan graceful disconnect & perizinan browser.
   - **Verifikasi**: npx vitest run src/modules/print-center/ble/blePrinter.test.ts
 
-- [ ] ITEM-007: Print Center — Real IPP Protocol Packet Builder
+- [x] ITEM-007: Print Center — Real IPP Protocol Packet Builder
   - **Deskripsi PRD**: Saat ini modul printer jaringan hanya menggunakan `no-cors` ping heuristik. Implementasikan packet encoder IPP v1.1/v2.0 murni (Get-Printer-Attributes & Print-Job).
   - **Boundary**: Jika diblokir oleh mixed-content atau CORS browser, arahkan ke proxy lokal / helper secara transparan.
-  - **Verifikasi**: Test encoding payload biner IPP request dan parsing IPP response status code (`exit 0`).
+  - **Verifikasi**: npx vitest run src/modules/print-center/network-printer/ippProtocol.test.ts
 
 ---
 

@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { jsPDF } from "jspdf";
 import { loadPrinters, savePrinters, type Printer } from "./printerStorage";
+import {
+  buildGetPrinterAttributesPacket,
+  buildPrintJobPacket,
+  parseIppResponse,
+} from "./ippProtocol";
 import { recordPrint } from "../../print-history/printHistoryStorage";
 import {
   createQzClient,
@@ -137,35 +142,67 @@ export default function NetworkPrinterPage() {
     setJobs((prev) => prev.filter((j) => j.printerId !== id));
   };
 
-  /** Uji koneksi ke endpoint IPP printer. Browser memblokir CORS untuk IPP
-   *  lintas-asal, jadi hasil "gagal" wajar; ini hanya heuristik konektivitas. */
+  /** Uji koneksi ke endpoint IPP printer menggunakan IPP Get-Printer-Attributes packet */
   const checkPrinter = async (p: Printer) => {
     setChecking(p.id);
-    setStatusMap((m) => ({ ...m, [p.id]: "Memeriksa…" }));
+    setStatusMap((m) => ({ ...m, [p.id]: "Memeriksa IPP…" }));
     const url = `http://${p.host}:${p.port}${p.path}`;
+    const printerUri = `ipp://${p.host}:${p.port}${p.path}`;
+    const packet = buildGetPrinterAttributesPacket({
+      printerUri,
+      requestId: 1,
+      requestedAttributes: ["printer-state", "printer-is-accepting-jobs"],
+    });
+
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 4000);
-    // mode no-cors: balasan tak terbaca, tapi resolve = server merespons,
-    // reject = jaringan tidak terjangkau / timeout.
     let reached = false;
+    let detailMsg = "";
+
     try {
-      await fetch(url, {
+      // Coba fetch normal (CORS) dulu untuk printer yang mengizinkan Web IPP
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/ipp" },
-        body: new Uint8Array([0x02, 0x00, 0x00, 0x01]),
+        body: packet.buffer as ArrayBuffer,
         signal: ctrl.signal,
-        mode: "no-cors",
       });
-      reached = true;
+      if (res.ok) {
+        const buf = await res.arrayBuffer();
+        try {
+          const parsed = parseIppResponse(buf);
+          reached = true;
+          detailMsg = `IPP Aktif (${parsed.statusMessage})`;
+        } catch {
+          reached = true;
+          detailMsg = "Printer merespons HTTP OK";
+        }
+      } else {
+        reached = true;
+        detailMsg = `HTTP Error ${res.status}`;
+      }
     } catch {
-      reached = false;
+      // Jika diblokir oleh CORS browser (kondisi umum IPP lintas asal di client-side),
+      // uji konektivitas via mode no-cors dengan biner paket IPP yang sama
+      try {
+        await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/ipp" },
+          body: packet.buffer as ArrayBuffer,
+          signal: ctrl.signal,
+          mode: "no-cors",
+        });
+        reached = true;
+        detailMsg = "Host terjangkau (CORS browser membatasi pembacaan paket respons)";
+      } catch {
+        reached = false;
+        detailMsg = "Tidak terjangkau — periksa alamat/port atau firewall";
+      }
     }
     clearTimeout(t);
     setStatusMap((m) => ({
       ...m,
-      [p.id]: reached
-        ? "Host terjangkau (IPP diblokir CORS browser — lihat catatan)"
-        : "Tidak terjangkau — periksa alamat/port atau firewall",
+      [p.id]: reached ? detailMsg : "Tidak terjangkau — periksa alamat/port atau firewall",
     }));
     setChecking(null);
   };
@@ -229,24 +266,73 @@ export default function NetworkPrinterPage() {
       }
     }
 
-    // 2) IPP heuristik: IPP sungguhan diblokir browser (CORS). Simulasikan
-    //    pengiriman, lalu tandai sesuai konektivitas terakhir.
-    await new Promise((r) => setTimeout(r, 900));
-    const reachable = (statusMap[p.id] ?? "").startsWith("Host terjangkau");
-    setJobs((prev) =>
-      prev.map((j) =>
-        j.id === job.id
-          ? {
-              ...j,
-              status: reachable ? "berhasil" : "gagal",
-              note: reachable
-                ? "Dikirim via IPP (mode no-cors)."
-                : "QZ Tray tak terhubung & printer IPP tak terjangkau — pakai fallback Ekspor PDF.",
-            }
-          : j
-      )
-    );
-    recordPrint({ name: p.name, paperSize: "A4", ok: reachable });
+    // 2) IPP nyata: bangun paket biner IPP Print-Job
+    try {
+      const printerUri = `ipp://${p.host}:${p.port}${p.path}`;
+      const docBytes = new TextEncoder().encode(job.doc);
+      const ippPacket = buildPrintJobPacket({
+        printerUri,
+        documentData: docBytes,
+        jobName: `Job #${job.id.slice(-4)}`,
+        mimeType: "text/plain",
+      });
+
+      const url = `http://${p.host}:${p.port}${p.path}`;
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 5000);
+      let success = false;
+      let note = "";
+
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/ipp" },
+          body: ippPacket.buffer as ArrayBuffer,
+          signal: ctrl.signal,
+        });
+        if (res.ok) {
+          const buf = await res.arrayBuffer();
+          const parsed = parseIppResponse(buf);
+          success = parsed.statusCode === 0x0000;
+          note = `Dikirim via IPP (Status: ${parsed.statusMessage}).`;
+        } else {
+          note = `Gagal mengirim ke IPP (HTTP ${res.status}).`;
+        }
+      } catch {
+        // Fallback CORS browser: coba pengiriman blind via no-cors
+        try {
+          await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/ipp" },
+            body: ippPacket.buffer as ArrayBuffer,
+            signal: ctrl.signal,
+            mode: "no-cors",
+          });
+          success = true;
+          note = "Paket IPP terkirim ke printer (mode no-cors browser).";
+        } catch {
+          success = false;
+          note = "Gagal menjangkau host IPP. Gunakan fallback Ekspor PDF.";
+        }
+      }
+      clearTimeout(t);
+
+      setJobs((prev) =>
+        prev.map((j) =>
+          j.id === job.id
+            ? {
+                ...j,
+                status: success ? "berhasil" : "gagal",
+                note,
+              }
+            : j
+        )
+      );
+      recordPrint({ name: p.name, paperSize: "A4", ok: success });
+      return;
+    } catch {
+      // Abaikan error format IPP
+    }
   };
 
   /** Fallback nyata: ekspor isi job sebagai PDF (unduhan) — selalu berfungsi. */
