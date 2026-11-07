@@ -1,0 +1,13 @@
+{
+  "entrypoint": "freebuff-worker.js",
+  "compatibilityDate": "2024-09-23",
+  "modules": [
+    {
+      "name": "freebuff-worker.js",
+      "type": "esm",
+      "path": "./freebuff-worker.js"
+    }
+  ],
+  "assetsDirectory": "./dist",
+  "spa": true
+}
