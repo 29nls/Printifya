@@ -72,10 +72,10 @@ File ini dirancang untuk dijalankan oleh **Autonomous AI Agent Loop** dengan kri
 
 ## Fase 4: Cloud Sync, Auth & Backend Integration (Opsional / Client-Server)
 
-- [ ] ITEM-010: Backend / Cloud — Sinkronisasi Template & Riwayat Cloud (Supabase / REST)
+- [x] ITEM-010: Backend / Cloud — Sinkronisasi Template & Riwayat Cloud (Supabase / REST)
   - **Deskripsi PRD**: Opsi bagi pengguna untuk login dan menyimpan arsip dokumen serta riwayat cetak ke backend PostgreSQL/S3.
   - **Boundary**: Mode offline lokal tetap menjadi default utama; sinkronisasi awan adalah fitur opt-in yang tidak memutus alur tanpa internet.
-  - **Verifikasi**: Unit test adapter penyimpanan `cloudStorageAdapter.test.ts` (menguji isolasi lokal vs remote saat token auth ada/tidak ada) (`exit 0`).
+  - **Verifikasi**: npx vitest run src/modules/cloud-sync/cloudStorageAdapter.test.ts
 
 - [ ] ITEM-011: Multi-User & Audit Logging
   - **Deskripsi PRD**: Pencatatan kuota cetak dan log aktivitas cetak per pengguna (khusus skenario kantor/sekolah).
