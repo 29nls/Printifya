@@ -4,6 +4,7 @@ import {
   cellDisplay,
   colHeader,
   evaluateRaw,
+  parseCsv,
   serialFromLocalDate,
   startOfLocalDaySerial,
   type SheetGrid,
@@ -105,6 +106,18 @@ describe("evaluateRaw — fungsi", () => {
     expect(evaluateRaw("=MIN(A1:D1)", grids)).toBe(1);
     expect(evaluateRaw("=MAX(A1:D1)", grids)).toBe(4);
     expect(evaluateRaw("=COUNT(A1:D1)", grids)).toBe(4);
+  });
+
+  it("COUNTA / PRODUCT / ABS / INT / PMT (formula lanjutan & finansial)", () => {
+    const grids = [g([["10", "20", "teks", ""]])];
+    expect(evaluateRaw("=COUNTA(A1:D1)", grids)).toBe(3); // teks & angka terhitung, sel kosong dilewati
+    expect(evaluateRaw("=PRODUCT(A1:B1)", grids)).toBe(200);
+    expect(evaluateRaw("=ABS(-45.6)", grids)).toBe(45.6);
+    expect(evaluateRaw("=INT(45.9)", grids)).toBe(45);
+    expect(evaluateRaw("=INT(-45.1)", grids)).toBe(-46);
+    // PMT pinjaman 1000 dengan bunga 10% selama 1 periode
+    // PMT = -(0.1 * 1000 * 1.1) / (1.1 - 1) = -1100
+    expect(evaluateRaw("=ROUND(PMT(0.1, 1, 1000), 2)", grids)).toBe(-1100);
   });
 
   it("AVERAGE rentang kosong → NaN; SUM kosong → 0", () => {
@@ -313,5 +326,21 @@ describe("colHeader & buildCsv", () => {
 
   it("CSV: lembar kosong → BOM saja", () => {
     expect(buildCsv([g([])], 0)).toBe("\uFEFF");
+  });
+
+  it("parseCsv: membaca raw CSV, delimiter titik-koma, escaped quotes, multiline", () => {
+    const rawCsv = 'Nama,Umur,Catatan\r\n"Budi, S.Kom",28,"Pernah berkata: ""Halo"""\r\nSiti,24,Aktif';
+    const parsed = parseCsv(rawCsv);
+    expect(parsed).toEqual([
+      ["Nama", "Umur", "Catatan"],
+      ["Budi, S.Kom", "28", 'Pernah berkata: "Halo"'],
+      ["Siti", "24", "Aktif"],
+    ]);
+
+    const semicolonCsv = "Produk;Harga;Stok\nKertas A4;50000;10";
+    expect(parseCsv(semicolonCsv)).toEqual([
+      ["Produk", "Harga", "Stok"],
+      ["Kertas A4", "50000", "10"],
+    ]);
   });
 });

@@ -146,3 +146,60 @@
 .word-stats {
   margin-top: 12px;
 }
+
+/* ---------- Modal Sisip Tabel ---------- */
+.table-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+}
+
+.table-modal {
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #ccc);
+  border-radius: 8px;
+  padding: 20px;
+  width: 320px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.table-modal h3 {
+  margin: 0 0 16px;
+  font-size: 16px;
+}
+
+.table-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.table-modal-body label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+}
+
+.table-modal-body input[type="number"] {
+  width: 70px;
+  padding: 4px 8px;
+  border: 1px solid var(--border, #ccc);
+  border-radius: 4px;
+}
+
+.table-modal-body .checkbox-label {
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.table-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

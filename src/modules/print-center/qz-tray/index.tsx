@@ -6,6 +6,7 @@ import {
   type QzClient,
   type QzState,
 } from "./qzClient";
+import { WebUsbPrinterDriver } from "../webusb/webUsbPrinter";
 import "../../photo-studio/shared/style.css";
 import "./style.css";
 
@@ -18,6 +19,13 @@ export default function QzTrayPage() {
   const [logs, setLogs] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const logsRef = useRef<string[]>([]);
+
+  // State WebUSB Direct Driver
+  const usbDriverRef = useRef<WebUsbPrinterDriver>(new WebUsbPrinterDriver());
+  const [usbConnected, setUsbConnected] = useState(false);
+  const [usbDeviceName, setUsbDeviceName] = useState<string | null>(null);
+  const [usbStatusMsg, setUsbStatusMsg] = useState("");
+  const isUsbSupported = usbDriverRef.current.isSupported();
 
   const addLog = (msg: string) => {
     const next = [...logsRef.current, `${new Date().toLocaleTimeString("id-ID")} ${msg}`].slice(-40);
@@ -74,6 +82,59 @@ export default function QzTrayPage() {
     }
   };
 
+  /** Hubungkan printer USB langsung via WebUSB */
+  const handleConnectUsb = async () => {
+    setBusy(true);
+    setUsbStatusMsg("Membuka dialog perizinan WebUSB…");
+    try {
+      const res = await usbDriverRef.current.requestAndConnect();
+      setUsbStatusMsg(res.message);
+      if (res.ok) {
+        setUsbConnected(true);
+        const info = usbDriverRef.current.getDeviceInfo();
+        setUsbDeviceName(info?.productName || "USB Receipt Printer");
+        addLog(`[WebUSB] ${res.message}`);
+      } else {
+        setUsbConnected(false);
+        setUsbDeviceName(null);
+        addLog(`[WebUSB Error] ${res.message}`);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDisconnectUsb = async () => {
+    await usbDriverRef.current.disconnect();
+    setUsbConnected(false);
+    setUsbDeviceName(null);
+    setUsbStatusMsg("Koneksi USB diputus.");
+    addLog("[WebUSB] Perangkat USB diputus.");
+  };
+
+  const handleTestPrintUsb = async () => {
+    if (!usbConnected) return;
+    setBusy(true);
+    try {
+      // Decode ESC/POS base64 ke bytes
+      const base64 = escposText("PRINTIFYA - WEBUSB", testText || "Tes Cetak WebUSB");
+      const binaryStr = atob(base64);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+      const res = await usbDriverRef.current.printRaw(bytes);
+      setUsbStatusMsg(res.message);
+      addLog(`[WebUSB] ${res.message}`);
+    } catch (e) {
+      const err = e instanceof Error ? e.message : String(e);
+      setUsbStatusMsg(`Gagal cetak USB: ${err}`);
+      addLog(`[WebUSB Error] ${err}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="qz-page">
       <header className="module-header">
@@ -91,7 +152,7 @@ export default function QzTrayPage() {
 
       <div className="qz-grid">
         <section className="panel">
-          <h2>Koneksi</h2>
+          <h2>Koneksi QZ Tray</h2>
           <div className={`qz-status qz-${status}`}>
             <span className="qz-dot" />
             <div>
@@ -120,6 +181,55 @@ export default function QzTrayPage() {
             <button type="button" className="btn" onClick={refreshPrinters} disabled={busy || status !== "connected"}>
               🔄 Muat Printer
             </button>
+          </div>
+        </section>
+
+        <section className="panel">
+          <h2>Driver WebUSB (Direct Printing)</h2>
+          <div className={`qz-status ${usbConnected ? "qz-connected" : "qz-idle"}`}>
+            <span className="qz-dot" />
+            <div>
+              <strong>
+                {usbConnected ? `Terhubung: ${usbDeviceName}` : isUsbSupported ? "Siap Dipasangkan" : "Tidak Didukung"}
+              </strong>
+              <p>
+                {usbStatusMsg ||
+                  (isUsbSupported
+                    ? "Hubungkan printer thermal USB langsung tanpa software tambahan."
+                    : "Browser ini belum mendukung WebUSB. Gunakan Chrome/Edge atau QZ Tray.")}
+              </p>
+            </div>
+          </div>
+          <div className="qz-actions">
+            {!usbConnected ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleConnectUsb}
+                disabled={busy || !isUsbSupported}
+              >
+                🔌 Sambung USB
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleTestPrintUsb}
+                  disabled={busy}
+                >
+                  🖨️ Tes Cetak USB
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={handleDisconnectUsb}
+                  disabled={busy}
+                >
+                  ⏹️ Lepas USB
+                </button>
+              </>
+            )}
           </div>
         </section>
 

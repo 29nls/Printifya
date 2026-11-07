@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { printHtmlSheet } from "../../print-center/printer-lokal/printHtml";
 import { recordPrint } from "../../print-history/printHistoryStorage";
+import { downloadUrl } from "../../shared/downloadUrl";
 import { loadString, saveString } from "../../shared/prefsStorage";
 import { buildDocHtml } from "./docHtml";
+import { buildDocxBlob } from "./docxExport";
+import { buildTableHtml } from "./tableOps";
+import { buildImageHtml, fitImageDimensions, IMAGE_JPEG_QUALITY, type ImageAlignment } from "./imageOps";
 import {
   getPaper,
   PAPER_SIZES,
@@ -68,6 +72,17 @@ export default function WordEditorPage() {
   const [paper, setPaper] = useState<PaperSize>(() =>
     getPaper(loadPaperId() ?? undefined)
   );
+  const [showTableModal, setShowTableModal] = useState(false);
+  const [tableRows, setTableRows] = useState(3);
+  const [tableCols, setTableCols] = useState(3);
+  const [tableHasHeader, setTableHasHeader] = useState(true);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [pendingImageSrc, setPendingImageSrc] = useState<string | null>(null);
+  const [imageAlignment, setImageAlignment] = useState<ImageAlignment>("center");
+  const [imageCaption, setImageCaption] = useState("");
+  const [imageMaxWidth, setImageMaxWidth] = useState(80);
 
   // Persist ukuran kertas terpilih.
   useEffect(() => savePaperId(paper.id), [paper]);
@@ -83,6 +98,68 @@ export default function WordEditorPage() {
     editorRef.current?.focus();
     document.execCommand(cmd, false, value);
     updateStats();
+  };
+
+  /** Sisipkan tabel interaktif pada posisi kursor */
+  const insertTable = () => {
+    const tableHtml = buildTableHtml({
+      rows: tableRows,
+      cols: tableCols,
+      hasHeader: tableHasHeader,
+    });
+    exec("insertHTML", tableHtml);
+    setShowTableModal(false);
+  };
+
+  /** Pilih file gambar lokal */
+  const handleSelectImageFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setError("Berkas yang dipilih harus berupa gambar.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const src = reader.result as string;
+      const img = new Image();
+      img.onload = () => {
+        const { width, height } = fitImageDimensions(img.naturalWidth, img.naturalHeight);
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressed = canvas.toDataURL("image/jpeg", IMAGE_JPEG_QUALITY);
+          setPendingImageSrc(compressed);
+          setShowImageModal(true);
+        } else {
+          setPendingImageSrc(src);
+          setShowImageModal(true);
+        }
+      };
+      img.src = src;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  /** Sisipkan gambar yang telah dikompresi ke dokumen */
+  const insertImage = () => {
+    if (!pendingImageSrc) return;
+    const imgHtml = buildImageHtml({
+      src: pendingImageSrc,
+      alignment: imageAlignment,
+      caption: imageCaption.trim() || undefined,
+      maxWidthPercent: imageMaxWidth,
+    });
+    exec("insertHTML", imgHtml);
+    setShowImageModal(false);
+    setPendingImageSrc(null);
+    setImageCaption("");
   };
 
   /** Pantau status aktif (tebal/miring/dll) saat pilihan berubah. */
@@ -137,6 +214,19 @@ export default function WordEditorPage() {
     editorRef.current?.focus();
   };
 
+  /** Ekspor dokumen ke berkas .docx client-side */
+  const handleExportDocx = () => {
+    try {
+      const content = editorRef.current?.innerHTML ?? "";
+      const blob = buildDocxBlob(title, content);
+      const url = URL.createObjectURL(blob);
+      const filename = `${(title || "dokumen").toLowerCase().replace(/[^a-z0-9_-]/gi, "-")}.docx`;
+      downloadUrl(url, filename);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Gagal mengekspor file DOCX.");
+    }
+  };
+
   return (
     <div className="word-editor-page">
       <header className="module-header">
@@ -181,6 +271,14 @@ export default function WordEditorPage() {
               onClick={handlePrint}
             >
               {printing ? "Menyiapkan…" : "🖨️ Cetak / Simpan PDF"}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              title="Unduh dokumen dalam format Microsoft Word (.docx)"
+              onClick={handleExportDocx}
+            >
+              📄 Unduh .DOCX
             </button>
             <button type="button" className="btn" onClick={resetDoc}>
               🗑️ Kosongkan
@@ -254,8 +352,139 @@ export default function WordEditorPage() {
               </option>
             ))}
           </select>
+
+          <span className="toolbar-sep" />
+
+          <button
+            type="button"
+            className="btn tool-btn"
+            title="Sisip Tabel"
+            onClick={() => setShowTableModal(true)}
+          >
+            📊 +Tabel
+          </button>
+
+          <button
+            type="button"
+            className="btn tool-btn"
+            title="Sisip Gambar / Watermark"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            🖼️ +Gambar
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            style={{ display: "none" }}
+            onChange={handleSelectImageFile}
+          />
         </div>
       </section>
+
+      {showTableModal && (
+        <div className="table-modal-backdrop" onClick={() => setShowTableModal(false)}>
+          <div className="table-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Sisipkan Tabel</h3>
+            <div className="table-modal-body">
+              <label>
+                Jumlah Baris:
+                <input
+                  type="number"
+                  min="1"
+                  max="50"
+                  value={tableRows}
+                  onChange={(e) => setTableRows(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                />
+              </label>
+              <label>
+                Jumlah Kolom:
+                <input
+                  type="number"
+                  min="1"
+                  max="20"
+                  value={tableCols}
+                  onChange={(e) => setTableCols(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                />
+              </label>
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={tableHasHeader}
+                  onChange={(e) => setTableHasHeader(e.target.checked)}
+                />
+                Gunakan Baris Header
+              </label>
+            </div>
+            <div className="table-modal-actions">
+              <button type="button" className="btn btn-primary" onClick={insertTable}>
+                Sisipkan
+              </button>
+              <button type="button" className="btn" onClick={() => setShowTableModal(false)}>
+                Batal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showImageModal && pendingImageSrc && (
+        <div className="table-modal-backdrop" onClick={() => setShowImageModal(false)}>
+          <div className="table-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Atur & Sisipkan Gambar</h3>
+            <div className="table-modal-body">
+              <div style={{ textAlign: "center", marginBottom: 8 }}>
+                <img
+                  src={pendingImageSrc}
+                  alt="Preview"
+                  style={{ maxHeight: 120, maxWidth: "100%", borderRadius: 4 }}
+                />
+              </div>
+              <label>
+                Perataan:
+                <select
+                  value={imageAlignment}
+                  onChange={(e) => setImageAlignment(e.target.value as ImageAlignment)}
+                  style={{ padding: "4px 8px", borderRadius: 4 }}
+                >
+                  <option value="center">Rata Tengah</option>
+                  <option value="left">Rata Kiri</option>
+                  <option value="right">Rata Kanan</option>
+                </select>
+              </label>
+              <label>
+                Lebar Maksimal:
+                <input
+                  type="number"
+                  min="10"
+                  max="100"
+                  value={imageMaxWidth}
+                  onChange={(e) => setImageMaxWidth(Math.max(10, Math.min(100, parseInt(e.target.value, 10) || 80)))}
+                />
+                %
+              </label>
+              <label style={{ flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+                Keterangan / Caption:
+                <input
+                  type="text"
+                  placeholder="Keterangan opsional"
+                  value={imageCaption}
+                  onChange={(e) => setImageCaption(e.target.value)}
+                  style={{ width: "100%", padding: "4px 8px", borderRadius: 4 }}
+                />
+              </label>
+            </div>
+            <div className="table-modal-actions">
+              <button type="button" className="btn btn-primary" onClick={insertImage}>
+                Sisipkan
+              </button>
+              <button type="button" className="btn" onClick={() => setShowImageModal(false)}>
+                Batal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <section className="panel word-editor-panel">
         <div

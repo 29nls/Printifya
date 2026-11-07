@@ -15,34 +15,34 @@ File ini dirancang untuk dijalankan oleh **Autonomous AI Agent Loop** dengan kri
 
 ## Fase 1: Rich Text & Document Editing Core (Client-side & Offline)
 
-- [ ] ITEM-001: Editor Dokumen — Dukungan Tabel Interaktif di Word Editor
+- [x] ITEM-001: Editor Dokumen — Dukungan Tabel Interaktif di Word Editor
   - **Deskripsi PRD**: Tabel dengan kemampuan tambah baris/kolom, atur border, dan sel pada modul Word Editor (`src/modules/document-studio/word-editor/`).
   - **Boundary**: Tetap mendukung export cetak HTML & PDF tanpa merusak styling font/paragraf yang sudah ada.
   - **Verifikasi**: `npm run test -- -t "word-editor"` atau file unit test tabel dokumen lulus (`exit 0`).
 
-- [ ] ITEM-002: Editor Dokumen — Dukungan Sisip Gambar / Watermark Logo di Word Editor
+- [x] ITEM-002: Editor Dokumen — Dukungan Sisip Gambar / Watermark Logo di Word Editor
   - **Deskripsi PRD**: Pengguna dapat menyisipkan gambar lokal (Base64/Blob) ke dalam isi dokumen dan mengatur perataannya.
   - **Boundary**: Ukuran gambar harus di-clamp atau dikompresi agar tidak menyebabkan local storage melebihi kuota budget.
-  - **Verifikasi**: Buat test `wordEditorImage.test.ts` untuk memverifikasi serialisasi HTML dokumen dengan gambar valid (`exit 0`).
+  - **Verifikasi**: npx vitest run src/modules/document-studio/word-editor/wordEditorImage.test.ts (`exit 0`).
 
-- [ ] ITEM-003: Spreadsheet — Formula Lanjutan & Kompatibilitas Import CSV/XLSX
+- [x] ITEM-003: Spreadsheet — Formula Lanjutan & Kompatibilitas Import CSV/XLSX
   - **Deskripsi PRD**: Parser formula spreadsheet mendukung formula dasar finansial/statistik (COUNT, AVERAGE, MIN, MAX) dan impor data CSV langsung ke grid.
   - **Boundary**: Deteksi rekursi/siklus sel harus tetap aktif dan mencegah hang UI.
-  - **Verifikasi**: Tambahkan skenario di `src/modules/document-studio/excel-sheet/spreadsheet.test.ts` dan jalankan `npm run test -- -t "evaluateRaw"` (`exit 0`).
+  - **Verifikasi**: npx vitest run src/modules/document-studio/excel-sheet/spreadsheet.test.ts
 
-- [ ] ITEM-004: Editor Dokumen — Ekspor DOCX Client-Side
+- [x] ITEM-004: Editor Dokumen — Ekspor DOCX Client-Side
   - **Deskripsi PRD**: Selain ekspor PDF/HTML, pengguna dapat mengunduh dokumen teks dalam format file `.docx`.
   - **Boundary**: Menggunakan pustaka open-source MIT yang kompatibel dengan browser tanpa ketergantungan server Node.js.
-  - **Verifikasi**: File helper ekspor `.docx` mengembalikan Blob bertipe `application/vnd.openxmlformats-officedocument.wordprocessingml.document` yang dapat diuji (`exit 0`).
+  - **Verifikasi**: npx vitest run src/modules/document-studio/word-editor/docxExport.test.ts
 
 ---
 
 ## Fase 2: Hardware & Advanced Print Protocols (Print Center)
 
-- [ ] ITEM-005: Koneksi Printer — Driver WebUSB / Raw USB Direct Printing
+- [x] ITEM-005: Koneksi Printer — Driver WebUSB / Raw USB Direct Printing
   - **Deskripsi PRD**: Dukungan koneksi printer langsung via WebUSB API (untuk browser Chromium/Android) sebagai alternatif QZ Tray.
   - **Boundary**: Harus memiliki fallback deteksi otomatis jika WebUSB ditolak/tidak didukung oleh OS (misal Windows claim error).
-  - **Verifikasi**: Unit test mock WebUSB device pairing & handling status failure fallback (`exit 0`).
+  - **Verifikasi**: npx vitest run src/modules/print-center/webusb/webUsbPrinter.test.ts
 
 - [ ] ITEM-006: Koneksi Printer — Driver Web Bluetooth (BLE ESC/POS)
   - **Deskripsi PRD**: Dukungan cetak langsung ke thermal / portable printer via Web Bluetooth API.

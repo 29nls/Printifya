@@ -9,12 +9,17 @@ import {
   cellDisplay,
   COLS,
   colHeader,
+  parseCsv,
   ROWS,
   SHEET_NAMES,
   type SheetGrid,
 } from "./spreadsheet";
 import "../../photo-studio/shared/style.css";
 import "./style.css";
+
+function cloneGrids(grids: SheetGrid[]): SheetGrid[] {
+  return grids.map((g) => g.map((row) => [...row]));
+}
 
 function emptyGrid(): string[][] {
   return Array.from({ length: ROWS }, () => Array.from({ length: COLS }, () => ""));
@@ -53,6 +58,7 @@ export default function ExcelSheetPage() {
   const [fx, setFx] = useState("");
   const [error, setError] = useState("");
   const [printing, setPrinting] = useState(false);
+  const csvInputRef = useRef<HTMLInputElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef(false);
 
@@ -236,6 +242,39 @@ export default function ExcelSheetPage() {
     downloadUrl(url, `spreadsheet-${SHEET_NAMES[activeSheet].toLowerCase()}.csv`);
   };
 
+  const handleImportCsv = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result || "");
+      try {
+        const rows = parseCsv(text);
+        if (!rows.length) {
+          setError("File CSV kosong.");
+          return;
+        }
+
+        setGrids((prev) => {
+          const next = cloneGrids(prev);
+          const current = next[activeSheet];
+          for (let r = 0; r < Math.min(rows.length, ROWS); r++) {
+            for (let c = 0; c < Math.min(rows[r].length, COLS); c++) {
+              current[r][c] = rows[r][c];
+            }
+          }
+          return next;
+        });
+        setError("");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Gagal memproses file CSV.");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
   const handlePrint = () => {
     if (printing) return;
     setError("");
@@ -288,6 +327,21 @@ export default function ExcelSheetPage() {
             🗑️ Kosongkan
           </button>
           <span className="toolbar-spacer" />
+          <button
+            type="button"
+            className="btn"
+            title="Impor berkas CSV ke lembar aktif"
+            onClick={() => csvInputRef.current?.click()}
+          >
+            ⬆️ Impor CSV
+          </button>
+          <input
+            ref={csvInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            style={{ display: "none" }}
+            onChange={handleImportCsv}
+          />
           <button type="button" className="btn" onClick={handleCsv}>
             ⬇️ Ekspor CSV
           </button>

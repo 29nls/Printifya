@@ -256,6 +256,36 @@ function applyFunction(name: string, args: EvalValue[]): EvalValue {
       return nums.length ? Math.max(...nums) : NaN;
     case "COUNT":
       return nums.length;
+    case "COUNTA":
+      return args.filter((a) => a !== "" && a !== undefined && !isErr(a)).length;
+    case "PRODUCT":
+      return nums.length ? nums.reduce((p, a) => p * a, 1) : 0;
+    case "ABS": {
+      const a = args[0];
+      return typeof a === "number" && !Number.isNaN(a) ? Math.abs(a) : NaN;
+    }
+    case "INT": {
+      const a = args[0];
+      return typeof a === "number" && !Number.isNaN(a) ? Math.floor(a) : NaN;
+    }
+    case "PMT": {
+      // Sederhana kalkulator anuitas cicilan / pinjaman finansial:
+      // PMT(rate, nper, pv)
+      const rate = args[0];
+      const nper = args[1];
+      const pv = args[2];
+      if (
+        typeof rate !== "number" ||
+        typeof nper !== "number" ||
+        typeof pv !== "number" ||
+        nper <= 0
+      ) {
+        return NaN;
+      }
+      if (rate === 0) return -pv / nper;
+      const p = (rate * pv * Math.pow(1 + rate, nper)) / (Math.pow(1 + rate, nper) - 1);
+      return -p;
+    }
     case "IF":
       if (args.length < 3) return NaN;
       return isTruthy(args[0]) ? args[1] : args[2];
@@ -611,6 +641,96 @@ function csvCell(value: string): string {
     return `"${value.replace(/"/g, '""')}"`;
   }
   return value;
+}
+
+/**
+ * Parser CSV ringan client-side (mendukung koma/titik-koma/tab, string ber-quote, escaped quote, multiline).
+ */
+export function parseCsv(text: string): string[][] {
+  const clean = text.replace(/^\uFEFF/, "");
+  if (!clean.trim()) return [];
+
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let insideQuotes = false;
+
+  // Deteksi separator baris pertama: koma, titik-koma, atau tab
+  let sep = ",";
+  const firstLine = clean.split(/\r?\n/)[0] || "";
+  const commaCount = (firstLine.match(/,/g) || []).length;
+  const semiCount = (firstLine.match(/;/g) || []).length;
+  const tabCount = (firstLine.match(/\t/g) || []).length;
+  if (tabCount > commaCount && tabCount > semiCount) {
+    sep = "\t";
+  } else if (semiCount > commaCount) {
+    sep = ";";
+  }
+
+  let i = 0;
+  while (i < clean.length) {
+    const ch = clean[i];
+
+    if (insideQuotes) {
+      if (ch === '"') {
+        if (clean[i + 1] === '"') {
+          cell += '"';
+          i += 2;
+          continue;
+        } else {
+          insideQuotes = false;
+          i++;
+          continue;
+        }
+      }
+      cell += ch;
+      i++;
+      continue;
+    }
+
+    if (ch === '"') {
+      insideQuotes = true;
+      i++;
+      continue;
+    }
+
+    if (ch === sep) {
+      row.push(cell.trim());
+      cell = "";
+      i++;
+      continue;
+    }
+
+    if (ch === "\r") {
+      if (clean[i + 1] === "\n") i++;
+      row.push(cell.trim());
+      rows.push(row);
+      row = [];
+      cell = "";
+      i++;
+      continue;
+    }
+
+    if (ch === "\n") {
+      row.push(cell.trim());
+      rows.push(row);
+      row = [];
+      cell = "";
+      i++;
+      continue;
+    }
+
+    cell += ch;
+    i++;
+  }
+
+  // Sisa sel / baris terakhir
+  if (cell !== "" || row.length > 0) {
+    row.push(cell.trim());
+    rows.push(row);
+  }
+
+  return rows;
 }
 
 export type FormatAccessor = (r: number, c: number) => string | undefined;
