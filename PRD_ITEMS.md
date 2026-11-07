@@ -63,10 +63,10 @@ File ini dirancang untuk dijalankan oleh **Autonomous AI Agent Loop** dengan kri
   - **Boundary**: Proses manipulasi piksel harus non-blocking (bisa melalui helper murni atau WebWorker) dan menjaga DPI 300 saat diekspor.
   - **Verifikasi**: npx vitest run src/modules/photo-studio/shared/adjustImageParams.test.ts
 
-- [ ] ITEM-009: Photo Studio — Watermark & Metadata Stamping
+- [x] ITEM-009: Photo Studio — Watermark & Metadata Stamping
   - **Deskripsi PRD**: Fitur opsional untuk menyematkan watermark teks/logo studio dan tanggal foto pada sudut cetakan pas foto.
   - **Boundary**: Tidak boleh menutupi area deteksi wajah utama saat rasio pas foto standar dipilih.
-  - **Verifikasi**: Unit test komposisi canvas sheet membuktikan watermark tercetak pada koordinat lembar cetak (`exit 0`).
+  - **Verifikasi**: npx vitest run src/modules/photo-studio/shared/watermarkStamping.test.ts
 
 ---
 
